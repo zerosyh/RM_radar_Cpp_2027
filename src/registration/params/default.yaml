@@ -1,0 +1,66 @@
+/**:
+  ros__parameters:
+    # --- 通用参数 ---
+
+    # ROS2话题，用于接收实时点云数据（源点云）
+    pointcloud_sub_topic: "/lidar_pcds"
+    # 预先录制好的点云地图文件路径（目标点云）
+    # 注意：以下路径需要根据实际部署环境修改为项目根目录下的绝对路径
+    # 例如：/home/user/hnurm_radar/data/pcds.pcd
+    pcd_file: "pcds.pcd"
+    # 降采样后用于配准的地图文件路径，以提高性能
+    downsampled_pcd_file: "pcds_downsampled.pcd"
+    # 是否在启动时生成一次降采样地图。注意：正常配准时应设为 false
+    generate_downsampled_pcd : false
+    # 算法并行计算时使用的线程数，可设为CPU核心数
+    num_threads: 7
+    # 在计算法线或特征时，为每个点查找的邻居数量
+    num_neighbors: 20
+    # 匹配点对的最大距离的平方，用于剔除错误匹配
+    max_dist_sq: 4.0
+    # 对实时点云（源）进行体素降采样的栅格大小（米）
+    source_voxel_size: 0.25
+    # 对地图点云（目标）进行体素降采样的栅格大小（米）
+    map_voxel_size: 0.25
+
+    # 是否使用固定的地图文件进行配准 (Lidar-to-Map)
+    use_fixed: true
+
+    # --- 算法选择 ---
+
+    # 是否使用 Quatro 鲁棒配准算法
+    use_quatro: true
+
+    # --- Quatro 算法专用参数 ---
+
+    # 旋转估计部分的最大迭代次数
+    m_rotation_max_iter: 200
+    # 用于计算变换的最多匹配点对数量
+    m_num_max_corres: 100
+    # 计算点法线时使用的邻域半径（米）
+    m_normal_radius: 0.5
+    # 计算 FPFH 特征时使用的邻域半径（米），需大于法线半径
+    m_fpfh_radius: 1.2
+    # 基于特征匹配后，用于初步过滤的距离阈值
+    m_distance_threshold: 30.0
+    # 噪声水平的界限，Quatro算法鲁棒性的关键参数
+    m_noise_bound: 0.2
+    # GNC（渐进非凸）优化策略中的增长因子
+    m_rotation_gnc_factor: 1.39
+    # 旋转估计部分的收敛阈值，小于此值则停止迭代
+    m_rotation_cost_thr: 0.0001
+    # 是否在配准中估计尺度变换（通常为 false）
+    m_estimate_scale: false
+    # 是否使用优化的匹配算法来加速
+    m_use_optimized_matching: true
+
+    # --- 初始位姿参数（由 launch 文件从 main_config.yaml 注入） ---
+    # 全部为 0.0 表示未设置，节点将等待 /initialpose topic 或 Quatro 粗配准
+    initial_pose_x: 0.0
+    initial_pose_y: 0.0
+    initial_pose_z: 0.0
+    initial_pose_yaw: 0.0
+    # 若配置了初始位姿，是否优先直接用该初值启动 ICP（不先跑 Quatro）
+    prefer_config_initial_pose: true
+    # 首次 ICP 允许相对初值的最大平移跳变（米），超出则拒绝本次结果并重试
+    first_registration_max_translation_jump: 8.0

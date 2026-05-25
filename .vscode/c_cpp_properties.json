@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/opt/ros/humble/include/**",          
+                "/usr/include/opencv4",
+                "/usr/include/eigen3",
+                "/usr/include/yaml-cpp",
+                "${workspaceFolder}/install/**/include" ,
+                "/opt/ros/humble/include/cv_bridge",
+                "/usr/include/pcl-1.12" 
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/g++",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
