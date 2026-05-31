@@ -26,7 +26,7 @@ cmds=(
     "ros2 launch registration registration.launch.py"
     
     "ros2 run hnurm_radar detect"             # 新增：视觉检测节点
-    "ros2 bag play /home/syh/下载/全明星赛第一局 --rate 5.0"
+    "ros2 bag play /home/syh/下载/全明星赛第一局 --rate 1.0"
 )
 
 for cmd in "${cmds[@]}"

@@ -31,10 +31,19 @@ public:
     // 获取最近一次推理的车辆框（1280x1280坐标）
     const std::vector<cv::Rect>& getLastCarBoxes() const { return car_boxes_; }
 
-    // 获取最近一次推理的内部耗时（毫秒）
-    float getLastCarTime() const { return last_car_time_; }
-    float getLastArmorTime() const { return last_armor_time_; }
-    float getLastTotalTime() const { return last_total_time_; }
+    // ========= 细粒度耗时接口 =========
+    float getLastCarPreprocessTime()    const { return last_car_preprocess_time_; }
+    float getLastCarInferTime()         const { return last_car_infer_time_; }
+    float getLastCarPostprocessTime()   const { return last_car_postprocess_time_; }
+    float getLastArmorPreprocessTime()  const { return last_armor_preprocess_time_; }
+    float getLastArmorInferTime()       const { return last_armor_infer_time_; }
+    float getLastArmorPostprocessTime() const { return last_armor_postprocess_time_; }
+    float getLastDigitTotalTime()       const { return last_digit_total_time_; }
+    float getLastTotalTime()            const { return last_total_time_; }
+
+    // 兼容旧接口
+    float getLastCarTime()   const { return last_car_preprocess_time_ + last_car_infer_time_ + last_car_postprocess_time_; }
+    float getLastArmorTime() const { return last_armor_preprocess_time_ + last_armor_infer_time_ + last_armor_postprocess_time_ + last_digit_total_time_; }
 
     InferEngine(const InferEngine&) = delete;
     InferEngine& operator=(const InferEngine&) = delete;
@@ -58,8 +67,13 @@ private:
     std::vector<std::pair<float,float>> car_bottom_pts_;
     std::vector<std::vector<float>> armor_host_buffers_;
 
-    // 内部耗时记录
-    float last_car_time_ = 0.0f;
-    float last_armor_time_ = 0.0f;
-    float last_total_time_ = 0.0f;
+    // ========= 细粒度耗时记录（毫秒） =========
+    float last_car_preprocess_time_    = 0.0f;
+    float last_car_infer_time_         = 0.0f;
+    float last_car_postprocess_time_   = 0.0f;
+    float last_armor_preprocess_time_  = 0.0f;
+    float last_armor_infer_time_       = 0.0f;
+    float last_armor_postprocess_time_ = 0.0f;
+    float last_digit_total_time_       = 0.0f;
+    float last_total_time_             = 0.0f;
 };

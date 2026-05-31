@@ -189,15 +189,18 @@ std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
     float scale_x = static_cast<float>(orig_w) / 1280.0f;
     float scale_y = static_cast<float>(orig_h) / 1280.0f;
 
-    // ---- 阶段1：整车检测 ----
-    auto t_car_start = std::chrono::steady_clock::now();
+    // ========= 阶段1：整车检测 =========
+    auto t_car_pre_start = std::chrono::steady_clock::now();
     preprocess_on_gpu_ex(frame_resized, static_cast<float*>(engine_car_.d_input), 1280, 1280, stream_, d_scratch_car_);
+    auto t_car_pre_end = std::chrono::steady_clock::now();
+
+    auto t_car_infer_start = std::chrono::steady_clock::now();
     engine_car_.context->enqueueV3(stream_);
     cudaMemcpyAsync(engine_car_.hostOutput.data(), engine_car_.d_output, engine_car_.outputSize, cudaMemcpyDeviceToHost, stream_);
     cudaStreamSynchronize(stream_);
-    auto t_car_end = std::chrono::steady_clock::now();
-    last_car_time_ = std::chrono::duration<float, std::milli>(t_car_end - t_car_start).count();
+    auto t_car_infer_end = std::chrono::steady_clock::now();
 
+    // 后处理：解析车辆框
     car_boxes_.clear();
     car_bottom_pts_.clear();
     for (int i = 0; i < engine_car_.outDim1; ++i) {
@@ -211,14 +214,20 @@ std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
         car_boxes_.emplace_back(cv::Rect(cv::Point(x1, y1), cv::Point(x2, y2)));
         car_bottom_pts_.emplace_back((x1 + x2) / 2.0f, y2);
     }
+    auto t_car_post_end = std::chrono::steady_clock::now();
 
-    // ---- 阶段2+3：装甲板 + 数字分类 ----
-    auto t_armor_start = std::chrono::steady_clock::now();
+    // 记录阶段1耗时
+    last_car_preprocess_time_  = std::chrono::duration<float, std::milli>(t_car_pre_end - t_car_pre_start).count();
+    last_car_infer_time_       = std::chrono::duration<float, std::milli>(t_car_infer_end - t_car_infer_start).count();
+    last_car_postprocess_time_ = std::chrono::duration<float, std::milli>(t_car_post_end - t_car_infer_end).count();
+
+    // ========= 阶段2+3：装甲板检测 + 数字分类 =========
+    auto t_armor_pre_start = std::chrono::steady_clock::now();
     std::vector<InferArmor> armors;
     armor_host_buffers_.resize(car_boxes_.size(),
         std::vector<float>(engine_armor_.outDim1 * engine_armor_.outDim2));
 
-    // 批量装甲板推理
+    // 批量装甲板预处理 + 推理
     for (size_t i = 0; i < car_boxes_.size(); ++i) {
         cv::Rect car_exp = expand_bbox(car_boxes_[i], 1.2f, 1280, 1280);
         cv::Mat car_roi = frame_resized(car_exp);
@@ -229,8 +238,10 @@ std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
         cudaMemcpyAsync(armor_host_buffers_[i].data(), engine_armor_.d_output, engine_armor_.outputSize, cudaMemcpyDeviceToHost, stream_);
     }
     cudaStreamSynchronize(stream_);
+    auto t_armor_pre_end = std::chrono::steady_clock::now();  // 包含预处理+推理+同步
 
     // 解析装甲板 + 数字分类
+    float digit_total_time = 0.0f;
     for (size_t i = 0; i < car_boxes_.size(); ++i) {
         cv::Rect car_exp = expand_bbox(car_boxes_[i], 1.2f, 1280, 1280);
         cv::Mat car_roi = frame_resized(car_exp);
@@ -245,7 +256,7 @@ std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
         for (int j = 0; j < engine_armor_.outDim1; ++j) {
             float* det = armor_out.data() + j * engine_armor_.outDim2;
             float conf = det[4];
-            int cls = det[5];
+            int cls = det[5];   // Stage2颜色类别：0=dead, 1=红, 2=蓝
             if (conf < conf_armor_) continue;
 
             float car_x1 = (det[0] - dw3) / scale3;
@@ -258,30 +269,46 @@ std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
                                  std::clamp(int(car_y2-car_y1),0,car_roi.rows-1));
             if (a_rect_1280.width <= 0 || a_rect_1280.height <= 0) continue;
 
-            // 数字分类
+            // 数字分类（Stage3）
             cv::Rect a_exp = expand_bbox(a_rect_1280, 1.1f, car_roi.cols, car_roi.rows);
             cv::Mat armor_roi = car_roi(a_exp);
             cv::Mat armor_roi_rgb;
             cv::cvtColor(armor_roi, armor_roi_rgb, cv::COLOR_BGR2RGB);
+
             size_t classify_scratch_size = armor_roi_rgb.total() * 3;
             uint8_t* d_classify_scratch = nullptr;
             cudaMallocAsync(&d_classify_scratch, classify_scratch_size, stream_);
-            preprocess_classify_on_gpu_ex(armor_roi_rgb, static_cast<float*>(engine_digit_.d_input), 224, 224, stream_, d_classify_scratch);
+
+            auto t_digit_start = std::chrono::steady_clock::now();
+            // 数字分类模型输入尺寸为 64x64
+            preprocess_classify_on_gpu_ex(armor_roi_rgb, static_cast<float*>(engine_digit_.d_input), 64, 64, stream_, d_classify_scratch);
             engine_digit_.context->enqueueV3(stream_);
             cudaMemcpyAsync(engine_digit_.hostOutput.data(), engine_digit_.d_output, engine_digit_.outputSize, cudaMemcpyDeviceToHost, stream_);
             cudaStreamSynchronize(stream_);
+            auto t_digit_end = std::chrono::steady_clock::now();
+            digit_total_time += std::chrono::duration<float, std::milli>(t_digit_end - t_digit_start).count();
+
             cudaFreeAsync(d_classify_scratch, stream_);
 
+            // 概率计算
             std::vector<float> probs(engine_digit_.hostOutput.begin(), engine_digit_.hostOutput.begin() + engine_digit_.outDim1);
             softmax(probs.data(), engine_digit_.outDim1);
             int max_idx = std::max_element(probs.begin(), probs.end()) - probs.begin();
             if (max_idx < 0 || max_idx >= static_cast<int>(labels_.size())) continue;
 
-            char color3 = (cls == 1) ? 'R' : ((cls == 2) ? 'B' : 'G');
-            std::string label2 = labels_[max_idx];
-            char color2 = label2[0];
-            char final_color = (color2 == color3) ? color2 : (probs[max_idx] > conf_armor_ ? color2 : color3);
-            std::string final_label = final_color + label2.substr(1);
+            // Stage2 颜色映射: 0->D, 1->R, 2->B
+            char color_stage2;
+            if (cls == 0)      color_stage2 = 'D';
+            else if (cls == 1) color_stage2 = 'R';
+            else if (cls == 2) color_stage2 = 'B';
+            else continue;
+
+            // 如需忽略 dead 装甲板，可取消下一行注释
+            // if (color_stage2 == 'D') continue;
+
+            // 最终标签 = 颜色 + 数字字符串
+            std::string digit_str = labels_[max_idx];   // e.g. "1","2","S"
+            std::string final_label = color_stage2 + digit_str;
 
             InferArmor ar;
             ar.abs_rect = cv::Rect(static_cast<int>((car_exp.x + a_rect_1280.x) * scale_x),
@@ -295,9 +322,16 @@ std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
             armors.push_back(ar);
         }
     }
-    auto t_armor_end = std::chrono::steady_clock::now();
-    last_armor_time_ = std::chrono::duration<float, std::milli>(t_armor_end - t_armor_start).count();
-    last_total_time_ = std::chrono::duration<float, std::milli>(t_armor_end - t_total_start).count();
+    auto t_armor_post_end = std::chrono::steady_clock::now();
+
+    // 记录阶段2+3耗时
+    last_armor_preprocess_time_  = std::chrono::duration<float, std::milli>(t_armor_pre_end - t_armor_pre_start).count();
+    last_armor_infer_time_       = 0.0f;  // 已包含在 preprocess 中（异步流水线无法精确拆分）
+    last_armor_postprocess_time_ = std::chrono::duration<float, std::milli>(t_armor_post_end - t_armor_pre_end).count() - digit_total_time;
+    last_digit_total_time_       = digit_total_time;
+
+    auto t_total_end = std::chrono::steady_clock::now();
+    last_total_time_ = std::chrono::duration<float, std::milli>(t_total_end - t_total_start).count();
 
     return armors;
 }

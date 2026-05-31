@@ -1,14 +1,14 @@
 # 路径使用相对于项目根目录的相对路径，代码会自动通过 paths.resolve_path() 解析为绝对路径
 path:
-  stage_one_path:  "model/TensorRT/best.engine"
-  stage_two_path:  "model/TensorRT/armor2_nms.engine"
-  stage_three_path: "model/TensorRT/armor_digit.engine"
+  stage_one_path:  "model/TensorRT/car.engine"
+  stage_two_path: "model/TensorRT/armor2_hku.engine"
+  stage_three_path: "model/TensorRT/digit_hku.engine"
   tracker_path: "configs/botsort.yaml"
 
 
 params:
-  labels: ["B1", "B2", "B3", "B4", "B5", "B7", "R1", "R2", "R3", "R4", "R5", "R7"]
-  stage_one_conf: 0.73
+  labels: ["1","2","3","4","S","Q"]
+  stage_one_conf: 0.60
   stage_two_conf: 0.5
   stage_three_conf: 0.5
   life_time: 90                       # 生命周期

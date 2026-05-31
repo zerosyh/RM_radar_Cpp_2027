@@ -271,10 +271,6 @@ private:
 
         // 获取车辆框（1280坐标）用于绘制
         const auto& car_boxes = infer_engine_->getLastCarBoxes();
-        // 获取内部耗时用于统计
-        float car_ms = infer_engine_->getLastCarTime();
-        float armor_ms = infer_engine_->getLastArmorTime();
-        float total_infer_ms = infer_engine_->getLastTotalTime();
 
         // 准备1280尺寸图像用于绘制
         cv::Mat frame_resized;
@@ -337,11 +333,16 @@ private:
         }
         display_cv_.notify_one();
 
-        // 统计
+        // 细粒度统计累加
         auto t_processed = std::chrono::steady_clock::now();
         double total_ms = std::chrono::duration<double, std::milli>(t_processed - t_total).count();
-        car_time_ += car_ms;
-        armor_time_ += armor_ms;
+
+        car_pre_time_  += infer_engine_->getLastCarPreprocessTime();
+        car_inf_time_  += infer_engine_->getLastCarInferTime();
+        car_post_time_ += infer_engine_->getLastCarPostprocessTime();
+        armor_pre_time_  += infer_engine_->getLastArmorPreprocessTime();
+        armor_post_time_ += infer_engine_->getLastArmorPostprocessTime();
+        digit_time_ += infer_engine_->getLastDigitTotalTime();
         frame_time_ += total_ms;
         frame_count_++;
     }
@@ -391,19 +392,38 @@ private:
 
     void print_stats() {
         if (frame_count_ == 0) return;
-        double avg_car = car_time_ / frame_count_;
-        double avg_armor = armor_time_ / frame_count_;
+        double avg_car_pre  = car_pre_time_  / frame_count_;
+        double avg_car_inf  = car_inf_time_  / frame_count_;
+        double avg_car_post = car_post_time_ / frame_count_;
+        double avg_armor_pre  = armor_pre_time_  / frame_count_;
+        double avg_armor_post = armor_post_time_ / frame_count_;
+        double avg_digit = digit_time_ / frame_count_;
         double avg_frame = frame_time_ / frame_count_;
+
         RCLCPP_INFO(get_logger(),
-            "过去5秒: 帧数=%d | 整车+预处理 %.1fms | 装甲板推理 %.1fms | 总循环耗时 %.1fms | FPS %.1f",
-            frame_count_, avg_car, avg_armor, avg_frame, frame_count_ / 5.0);
+            "===== 过去5秒性能统计 (帧数: %d, FPS: %.1f) =====", frame_count_, frame_count_/5.0);
+        RCLCPP_INFO(get_logger(),
+            "  [Stage1 整车]  预处理:%5.1fms | 推理:%5.1fms | 后处理:%5.1fms | 合计:%5.1fms",
+            avg_car_pre, avg_car_inf, avg_car_post, avg_car_pre+avg_car_inf+avg_car_post);
+        RCLCPP_INFO(get_logger(),
+            "  [Stage2 装甲]  预处理+推理:%5.1fms | 后处理(坐标):%5.1fms",
+            avg_armor_pre, avg_armor_post);
+        RCLCPP_INFO(get_logger(),
+            "  [Stage3 数字]  总耗时:%5.1fms", avg_digit);
+        RCLCPP_INFO(get_logger(),
+            "  [总循环]       %.1fms", avg_frame);
+
         if (camera_mode_ == "hik" && hik_read_count_ > 0) {
             RCLCPP_INFO(get_logger(),
-                "Hik 共享内存读取平均耗时: %.2fms (帧数 %d)",
+                "  [Hik共享内存] 读取平均: %.2fms (帧数 %d)",
                 hik_read_time_ / hik_read_count_, hik_read_count_);
         }
+
+        // 重置计数器
         frame_count_ = 0;
-        car_time_ = armor_time_ = frame_time_ = 0.0;
+        car_pre_time_ = car_inf_time_ = car_post_time_ = 0.0;
+        armor_pre_time_ = armor_post_time_ = digit_time_ = 0.0;
+        frame_time_ = 0.0;
         hik_read_time_ = 0.0;
         hik_read_count_ = 0;
     }
@@ -452,8 +472,11 @@ private:
     std::thread hik_thread_;
     bool stop_hik_ = false;
 
+    // 细粒度统计累加器
     int frame_count_ = 0;
-    double car_time_ = 0.0, armor_time_ = 0.0, frame_time_ = 0.0;
+    double car_pre_time_ = 0.0, car_inf_time_ = 0.0, car_post_time_ = 0.0;
+    double armor_pre_time_ = 0.0, armor_post_time_ = 0.0, digit_time_ = 0.0;
+    double frame_time_ = 0.0;
     double hik_read_time_ = 0.0;
     int hik_read_count_ = 0;
 };
