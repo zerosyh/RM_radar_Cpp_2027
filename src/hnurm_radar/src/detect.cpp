@@ -378,9 +378,7 @@ private:
             for (int i = 0; i < (int)labels_.size(); ++i) {
                 if (labels_[i] == num_part) { digit_idx = i; break; }
             }
-            // T-DT: 忽略 class_label=0(unknown) 和 5(background)
-            if (digit_idx == 0 || digit_idx == 5) continue;
-            if (ar.track_id < 0) continue;
+            if (digit_idx < 0 || ar.track_id < 0) continue;
             auto it = best_armor_per_car.find(ar.track_id);
             if (it == best_armor_per_car.end() || ar.conf > it->second->conf) {
                 best_armor_per_car[ar.track_id] = &ar;
