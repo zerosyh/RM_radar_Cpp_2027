@@ -106,6 +106,7 @@ private:
                 float x = loc.x;
                 float y = loc.y;
                 float z = loc.z;
+                bool is_last_known = (loc.id < 0);
 
                 int xx = static_cast<int>(x * 100);
                 int yy = map_px_h_ - static_cast<int>(y * 100);
@@ -116,7 +117,9 @@ private:
                 std::string air_suffix = is_air ? " UAV" : "";
 
                 cv::Scalar color;
-                if (loc.label == "Red") {
+                if (is_last_known) {
+                    color = cv::Scalar(128, 128, 128);  // 灰色：已消失
+                } else if (loc.label == "Red") {
                     color = cv::Scalar(0, 0, 255);
                 } else if (loc.label == "Blue") {
                     color = cv::Scalar(255, 0, 0);
@@ -125,7 +128,9 @@ private:
                 }
 
                 char label_text[64];
-                if (loc.label == "Red" || loc.label == "Blue") {
+                if (is_last_known) {
+                    snprintf(label_text, sizeof(label_text), "%d", -loc.id);
+                } else if (loc.label == "Red" || loc.label == "Blue") {
                     snprintf(label_text, sizeof(label_text), "%d%s", loc.id, air_suffix.c_str());
                 } else {
                     snprintf(label_text, sizeof(label_text), "null");
@@ -136,10 +141,17 @@ private:
 
                 cv::putText(show_map, label_text, cv::Point(xx - 15, yy + 10),
                             cv::FONT_HERSHEY_SIMPLEX, 2, color, 4);
-                cv::putText(show_map, coord_text, cv::Point(xx, yy - 60),
-                            cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0), 4);
+                if (!is_last_known) {
+                    cv::putText(show_map, coord_text, cv::Point(xx, yy - 60),
+                                cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0), 4);
+                }
 
-                if (loc.label == "Red" || loc.label == "Blue") {
+                if (is_last_known) {
+                    // 虚线圆 + X 标记：已消失
+                    cv::circle(show_map, cv::Point(xx, yy), 50, color, 2);
+                    cv::line(show_map, cv::Point(xx - 30, yy - 30), cv::Point(xx + 30, yy + 30), color, 3);
+                    cv::line(show_map, cv::Point(xx + 30, yy - 30), cv::Point(xx - 30, yy + 30), color, 3);
+                } else if (loc.label == "Red" || loc.label == "Blue") {
                     drawRobotMarker(show_map, xx, yy, color, is_air, z);
                 } else {
                     cv::circle(show_map, cv::Point(xx, yy), 60, color, 4);

@@ -72,24 +72,24 @@ private:
     }
 };
 
-// ==================== T-DT Kalman_filter_plus 完全对齐 ====================
+// ==================== Kalman_filter_plus 对齐 T-DT ====================
 struct KalmanFilterPlus {
     cv::KalmanFilter KF;
-    float            last_time = 0;           // T-DT: 累加未更新时间
-    std::chrono::steady_clock::time_point timer; // T-DT: 计算 dt
+    float            last_time = 0;
+    std::chrono::steady_clock::time_point timer;
     float            delete_time = 2.0;       // T-DT: 超时阈值
-    pcl::PointXY     predict_point;           // T-DT: 预测点
-    std::deque<std::pair<int,int>> detect_history; // T-DT: (color, number)
-    static constexpr int MAX_HISTORY = 20;    // T-DT: max_history = 20
-    float  detect_r = 1;                      // T-DT: detect_r
-    float  car_max_speed = 2.5;               // T-DT: car_max_speed
-    float  dt_ = 0.1f;                        // T-DT: dt_
-    float  sigma_q_x = 50.0f, sigma_q_y = 50.0f;  // T-DT: Q
-    float  sigma_r_x = 0.1f, sigma_r_y = 0.1f;    // T-DT: R
-    bool   has_updated = false;               // T-DT: has_updated
-    int    hits = 1;                          // 累计更新次数（用于确认稳定航迹）
+    pcl::PointXY     predict_point;
+    std::deque<std::pair<double, pcl::PointXY>> history;      // T-DT: 雷达点时间序列
+    std::deque<std::pair<int,int>> detect_history;             // T-DT: (color, number)
+    static constexpr int MAX_HISTORY = 20;
+    float  detect_r = 1;
+    float  car_max_speed = 2.5;
+    float  dt_ = 0.1f;
+    float  sigma_q_x = 50.0f, sigma_q_y = 50.0f;
+    float  sigma_r_x = 0.1f, sigma_r_y = 0.1f;
+    bool   has_updated = false;
+    int    hits = 1;
 
-    // T-DT: Kalman_filter_plus(pcl::PointXY& input, rclcpp::Time time)
     KalmanFilterPlus(const pcl::PointXY& input, float)
         : last_time(0), delete_time(2.0f), detect_r(1.0f), car_max_speed(2.5f)
         , dt_(0.1f), sigma_q_x(50.0f), sigma_q_y(50.0f), sigma_r_x(0.1f), sigma_r_y(0.1f)
@@ -103,76 +103,57 @@ struct KalmanFilterPlus {
         state.at<float>(2) = input.y;
         state.at<float>(3) = 0.0f;
         KF.statePost = state;
-        // T-DT: transitionMatrix = [[1,dt_,0,0],[0,1,0,0],[0,0,1,dt_],[0,0,0,1]]
         KF.transitionMatrix = (cv::Mat_<float>(4,4) <<
             1, dt_, 0, 0,
             0, 1, 0, 0,
             0, 0, 1, dt_,
             0, 0, 0, 1);
-        // T-DT: measurementMatrix = [[1,0,0,0],[0,0,1,0]]
         KF.measurementMatrix = (cv::Mat_<float>(2,4) <<
             1, 0, 0, 0,
             0, 0, 1, 0);
-        // T-DT: processNoiseCov = Q
         KF.processNoiseCov = (cv::Mat_<float>(4,4) <<
             sigma_q_x * dt_*dt_*dt_ / 3, sigma_q_x * dt_*dt_ / 2, 0, 0,
             sigma_q_x * dt_*dt_ / 2, sigma_q_x * dt_, 0, 0,
             0, 0, sigma_q_y * dt_*dt_*dt_ / 3, sigma_q_y * dt_*dt_ / 2,
             0, 0, sigma_q_y * dt_*dt_ / 2, sigma_q_y * dt_);
-        // T-DT: measurementNoiseCov = [[r,0],[0,r]]
         KF.measurementNoiseCov = (cv::Mat_<float>(2,2) << sigma_r_x, 0, 0, sigma_r_y);
-        // T-DT: errorCovPost = I
         cv::setIdentity(KF.errorCovPost, cv::Scalar::all(1));
         has_updated = true;
     }
 
-    // T-DT: float get_time()
     float get_time() {
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        auto d = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - timer);
-        return duration.count() / 1000.0;
+        return d.count() / 1000.0;
     }
 
-    // T-DT: void update_predict_point()
-    //    dt_ = get_time();
-    //    timer = std::chrono::steady_clock::now();
-    //    auto result = KF.predict();
-    //    last_time += dt_;
-    //    predict_point = result
+    // T-DT: predict，超界则钳位 + 清零速度防止漂移
     void update_predict_point() {
         dt_ = get_time();
         timer = std::chrono::steady_clock::now();
-        KF.transitionMatrix = (cv::Mat_<float>(4,4) <<
-            1, dt_, 0, 0,
-            0, 1, 0, 0,
-            0, 0, 1, dt_,
-            0, 0, 0, 1);
-        // 更新 Q（dt_ 变了）
-        KF.processNoiseCov = (cv::Mat_<float>(4,4) <<
-            sigma_q_x * dt_*dt_*dt_ / 3, sigma_q_x * dt_*dt_ / 2, 0, 0,
-            sigma_q_x * dt_*dt_ / 2, sigma_q_x * dt_, 0, 0,
-            0, 0, sigma_q_y * dt_*dt_*dt_ / 3, sigma_q_y * dt_*dt_ / 2,
-            0, 0, sigma_q_y * dt_*dt_ / 2, sigma_q_y * dt_);
         auto result = KF.predict();
         last_time += dt_;
-        predict_point.x = result.at<float>(0);
-        predict_point.y = result.at<float>(2);
+        float px = result.at<float>(0);
+        float py = result.at<float>(2);
+        if (px < -2.0f || px > 30.0f || py < -2.0f || py > 17.0f) {
+            // 漂出场外：钳位并重置速度
+            predict_point.x = std::clamp(px, -2.0f, 30.0f);
+            predict_point.y = std::clamp(py, -2.0f, 17.0f);
+            KF.statePost.at<float>(1) = 0.0f;
+            KF.statePost.at<float>(3) = 0.0f;
+        } else {
+            predict_point.x = px;
+            predict_point.y = py;
+        }
     }
 
-    // T-DT: bool match(pcl::PointXY& input)
-    //    Distance(predict_point, input) < car_max_speed * dt_ + detect_r
     bool match(const pcl::PointXY& input) {
         float dx = predict_point.x - input.x;
         float dy = predict_point.y - input.y;
-        float dist = std::sqrt(dx*dx + dy*dy);
-        return dist < car_max_speed * dt_ + detect_r;
+        return std::sqrt(dx*dx + dy*dy) < car_max_speed * dt_ + detect_r;
     }
 
-    // T-DT: void update(pcl::PointXY& input, rclcpp::Time time)
-    //    KF.correct(meas);
-    //    predict_point = statePost
-    //    has_updated = true;
-    //    last_time = 0;  // ← 关键！update 重置 last_time
+    // T-DT: KF.correct + 记录雷达点时间序列
     void update(const pcl::PointXY& input) {
         cv::Mat meas(2, 1, CV_32F);
         meas.at<float>(0) = input.x;
@@ -181,16 +162,27 @@ struct KalmanFilterPlus {
         predict_point.x = KF.statePost.at<float>(0);
         predict_point.y = KF.statePost.at<float>(2);
         has_updated = true;
-        last_time = 0;  // T-DT: update 时 last_time 归零
+        last_time = 0;
         hits++;
+        // T-DT: 记录雷达点时间序列，供 cameraMatch 时间对齐
+        history.push_back({get_time(), input});
+        if (history.size() > MAX_HISTORY) history.pop_front();
     }
 
-    // T-DT: void camera_match(rclcpp::Time& time, pcl::PointXY& input, int color, int number)
-    //    找 history 中时间最近的点，距离 < detect_r 则注入
-    //    简化版：直接用 predict_point 匹配（和原版略有不同，但效果等价）
+    // T-DT 时间匹配: 找 history 中时间最近的点，时间差 <1s 且空间距离 <detect_r
     void cameraMatch(float field_x, float field_y, int color, int number) {
-        float dx = predict_point.x - field_x;
-        float dy = predict_point.y - field_y;
+        if (history.empty()) return;
+        const double TIME_THRESHOLD = 1.0;
+        double now_t = get_time();
+        double best_differ = 1e9;
+        pcl::PointXY best_point = history.front().second;
+        for (auto& [t, pt] : history) {
+            double differ = std::abs(t - now_t);
+            if (differ < best_differ) { best_differ = differ; best_point = pt; }
+        }
+        if (best_differ > TIME_THRESHOLD) return;
+        float dx = best_point.x - field_x;
+        float dy = best_point.y - field_y;
         if (std::sqrt(dx*dx + dy*dy) < detect_r) {
             detect_history.push_back({color, number});
             if (detect_history.size() > MAX_HISTORY)
@@ -198,23 +190,19 @@ struct KalmanFilterPlus {
         }
     }
 
-    // T-DT: int get_color()
     int getColor() const {
         if (detect_history.empty()) return 1;
         int red = 0, blue = 0;
         for (auto& [c, n] : detect_history) {
             if (c == 0) blue++;
             else if (c == 2) red++;
-            // c==1 (unknown) 不投票
         }
         if (red > blue) return 2;
         if (blue > red) return 0;
-        // 平票：取最近一票
         auto& [last_c, last_n] = detect_history.back();
         return (last_c == 2) ? 2 : 0;
     }
 
-    // T-DT: int get_number()
     int getNumber() const {
         int color = getColor();
         std::map<int, int> num_map;
@@ -300,12 +288,13 @@ private:
     bool debug_publish_all_;
     std::vector<std::string> labels_;
     Eigen::Matrix4d ext_mat_, ext_inv_, r2f_, r2f_inv_;
-    float kf_delete_time_ = 2.0f;
+    float kf_delete_time_ = 1.5f;
     float kf_max_speed_   = 2.5f;
     float kf_detect_r_    = 1.0f;
 
     std::vector<KalmanFilterPlus> KFs_;
     std::mutex kf_mutex_;  // 保护 KFs_，detectCb 和 pcdCb 可能并发访问
+    std::vector<std::pair<std::chrono::steady_clock::time_point, detect_result::msg::Location>> last_known_locs_;
 
     // 视觉缓存：时间戳对齐用
     struct DetectFrame {
@@ -349,9 +338,9 @@ private:
         for (int i = 0; i < (int)labels_.size(); ++i) {
             if (labels_[i] == num_part) { number = i; break; }
         }
-        int color = 1;
-        if (prefix == 'B') color = 0;
-        else if (prefix == 'R') color = 2;
+        int color = 1;             // unknown
+        if (prefix == 'B') color = 0;      // Blue
+        else if (prefix == 'R') color = 2; // Red
         return {color, number};
     }
 
@@ -456,8 +445,8 @@ private:
             // 过滤漂出场外的杂点 KF
             if (x < -2.0f || x > 30.0f || y < -2.0f || y > 17.0f) continue;
             detect_result::msg::Location loc;
-            loc.x  = x;
-            loc.y  = y;
+            loc.x  = std::clamp(x, -2.0f, 30.0f);
+            loc.y  = std::clamp(y, -2.0f, 17.0f);
             loc.z  = 2.0f;
             // per-KF 迟滞: x<13.5→Red, x>14.5→Blue, 中间保持
             char& c = air_color_cache_[&kf];
@@ -543,14 +532,35 @@ private:
                 }
             }
 
-            // Step 3: 始终清理超时 KF
+            // Step 3: 清理超时 KF，删除前记录最后坐标
             for (int i = (int)KFs_.size() - 1; i >= 0; --i) {
                 if (KFs_[i].last_time > KFs_[i].delete_time) {
+                    if (!KFs_[i].detect_history.empty()) {
+                        int c = KFs_[i].getColor();
+                        int n = KFs_[i].getNumber();
+                        if ((c == 0 || c == 2) && n >= 0 && n < (int)labels_.size()) {
+                            detect_result::msg::Location loc;
+                            loc.x = std::clamp(KFs_[i].predict_point.x, -2.0f, 30.0f);
+                            loc.y = std::clamp(KFs_[i].predict_point.y, -2.0f, 17.0f);
+                            loc.z = 0.0f;
+                            std::string lbl = (c == 0 ? "B" : "R") + labels_[n];
+                            loc.id = -labelToCarId(lbl);  // 负原id标记最后已知
+                            loc.label = (c == 2) ? "Red" : "Blue";
+                            last_known_locs_.push_back({std::chrono::steady_clock::now(), loc});
+                        }
+                    }
                     KFs_.erase(KFs_.begin() + i);
                 }
             }
+            // 清理超过 10 秒的最后已知位置
+            auto now = std::chrono::steady_clock::now();
+            last_known_locs_.erase(
+                std::remove_if(last_known_locs_.begin(), last_known_locs_.end(),
+                    [&](auto& p) { return std::chrono::duration<double>(now - p.first).count() > 10.0; }),
+                last_known_locs_.end());
 
-            // Step 4: 每个 KF 独立推入 Locations，不再按 number 槽位覆盖
+            // Step 4: 每个 KF 独立发布，同 cid 取 hits 最大去重，位置钳位防飘
+            std::map<int, const KalmanFilterPlus*> best_per_cid;
             for (auto& kf : KFs_) {
                 if (kf.detect_history.empty()) continue;
                 int color  = kf.getColor();
@@ -570,15 +580,24 @@ private:
                     enemy = (cid < 100 && cid > 0);
                     my7   = (cid == 107);
                 }
-                if (debug_publish_all_ || enemy || my7) {
-                    detect_result::msg::Location loc;
-                    loc.x  = kf.predict_point.x;
-                    loc.y  = kf.predict_point.y;
-                    loc.z  = 0.0f;
-                    loc.id = cid;
-                    loc.label = (color == 2) ? "Red" : "Blue";
-                    lm->locs.push_back(loc);
-                }
+                if (!(debug_publish_all_ || enemy || my7)) continue;
+                auto it = best_per_cid.find(cid);
+                if (it == best_per_cid.end() || kf.hits > it->second->hits)
+                    best_per_cid[cid] = &kf;
+            }
+            for (auto& [cid, kf] : best_per_cid) {
+                detect_result::msg::Location loc;
+                loc.x  = std::clamp(kf->predict_point.x, -2.0f, 30.0f);
+                loc.y  = std::clamp(kf->predict_point.y, -2.0f, 17.0f);
+                loc.z  = 0.0f;
+                loc.id = cid;
+                loc.label = (kf->getColor() == 2) ? "Red" : "Blue";
+                lm->locs.push_back(loc);
+            }
+            // 追加已消失 KF 的最后已知位置（跳过已被 live KF 覆盖的 id）
+            for (auto& [t, loc] : last_known_locs_) {
+                if (best_per_cid.find(-loc.id) != best_per_cid.end()) continue;
+                lm->locs.push_back(loc);
             }
         }  // 单次锁结束
         appendAirLocations(*lm);
@@ -648,10 +667,11 @@ private:
             }
         }
 
-        // 构建合并消息（地面 + 无人机）
+        // 构建合并消息（地面 + 无人机），同 pcdCb 的去重+钳位逻辑
         auto lm = std::make_unique<detect_result::msg::Locations>();
         {
             std::lock_guard<std::mutex> lock(kf_mutex_);
+            std::map<int, const KalmanFilterPlus*> best_per_cid;
             for (auto& kf : KFs_) {
                 if (kf.detect_history.empty()) continue;
                 int color  = kf.getColor();
@@ -669,15 +689,23 @@ private:
                 } else {
                     enemy = (cid < 100 && cid > 0); my7 = (cid == 107);
                 }
-                if (debug_publish_all_ || enemy || my7) {
-                    detect_result::msg::Location loc;
-                    loc.x  = kf.predict_point.x;
-                    loc.y  = kf.predict_point.y;
-                    loc.z  = 0.0f;
-                    loc.id = cid;
-                    loc.label = (color == 2) ? "Red" : "Blue";
-                    lm->locs.push_back(loc);
-                }
+                if (!(debug_publish_all_ || enemy || my7)) continue;
+                auto it = best_per_cid.find(cid);
+                if (it == best_per_cid.end() || kf.hits > it->second->hits)
+                    best_per_cid[cid] = &kf;
+            }
+            for (auto& [cid, kf] : best_per_cid) {
+                detect_result::msg::Location loc;
+                loc.x  = std::clamp(kf->predict_point.x, -2.0f, 30.0f);
+                loc.y  = std::clamp(kf->predict_point.y, -2.0f, 17.0f);
+                loc.z  = 0.0f;
+                loc.id = cid;
+                loc.label = (kf->getColor() == 2) ? "Red" : "Blue";
+                lm->locs.push_back(loc);
+            }
+            for (auto& [t, loc] : last_known_locs_) {
+                if (best_per_cid.find(-loc.id) != best_per_cid.end()) continue;
+                lm->locs.push_back(loc);
             }
         }
         appendAirLocations(*lm);
