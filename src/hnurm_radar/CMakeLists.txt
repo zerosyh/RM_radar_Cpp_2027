@@ -71,25 +71,14 @@ find_library(TENSORRT_PLUGIN_LIB nvinfer_plugin PATHS ${TENSORRT_LIB_DIR} NO_DEF
 # --------------- 可执行文件 ---------------
 
 # --- hnurm_radr_node ---
-add_executable(hnurm_radr_node src/hnurm_radr_node.cpp)
-target_include_directories(hnurm_radr_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_compile_features(hnurm_radr_node PUBLIC c_std_99 cxx_std_17)
-ament_target_dependencies(
-  hnurm_radr_node
-  "rclcpp"
-  "sensor_msgs"
-  "pcl_conversions"
-  "livox_ros_driver2"
-  "example_interfaces"
-)
+
 
 # --- detect 节点（已拆分：detect.cpp + infer.cu + HomographyTransformer.cpp）---
 add_executable(detect
   src/detect.cpp
   src/infer.cu
   src/HomographyTransformer.cpp
+  src/tracker.cpp
 )
 
 target_include_directories(detect PUBLIC
@@ -138,6 +127,27 @@ ament_target_dependencies(
 )
 target_link_libraries(lidar ${PCL_LIBRARIES} yaml-cpp Eigen3::Eigen)
 
+# --- radar 融合定位节点 ---
+add_executable(radar
+  src/radar.cpp
+)
+
+target_include_directories(radar PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(radar PUBLIC c_std_99 cxx_std_17)
+ament_target_dependencies(
+  radar
+  "rclcpp"
+  "sensor_msgs"
+  "pcl_conversions"
+  "tf2_ros"
+  "tf2_eigen"
+  "detect_result"
+  "yaml-cpp"
+)
+target_link_libraries(radar ${PCL_LIBRARIES} ${OpenCV_LIBS} yaml-cpp Eigen3::Eigen)
+
 # --- hik_camera_node ---
 add_executable(hik_camera_node src/hik_camera_node.cpp)
 target_include_directories(hik_camera_node PUBLIC
@@ -151,9 +161,25 @@ ament_target_dependencies(
   "cv_bridge"
 )
 target_link_libraries(hik_camera_node ${MVS_LIBRARY} ${OpenCV_LIBS})
+# --- display_panel 小地图可视化 ---
+add_executable(display_panel src/display_panel.cpp)
+
+target_include_directories(display_panel PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(display_panel PUBLIC c_std_99 cxx_std_17)
+ament_target_dependencies(
+  display_panel
+  "rclcpp"
+  "sensor_msgs"
+  "detect_result"
+  "cv_bridge"
+)
+target_link_libraries(display_panel ${OpenCV_LIBS} yaml-cpp)
+
 
 # --------------- 安装 ---------------
-install(TARGETS hnurm_radr_node lidar hik_camera_node detect
+install(TARGETS  lidar hik_camera_node detect radar display_panel
   DESTINATION lib/${PROJECT_NAME})
 
 # 安装模型和配置等资源

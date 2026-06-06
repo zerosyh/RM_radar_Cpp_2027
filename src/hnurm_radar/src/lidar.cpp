@@ -114,28 +114,25 @@ class DynamicCloudNode : public rclcpp::Node {
             rate.sleep();
         }
     }
+    // 飞镖区域（蓝方堡垒右上角引导灯附近）
     static bool isDartRegion(float x, float y, float z) {
         return (x > 28.0f - 0.5889f - 0.1885f && x < 28.0f - 0.5889f) &&
                (y > 3.925f && y < 4.525f) &&
                (z > 2.4722f - 0.859f + 0.1f && z < 2.4722f);
     }
 
-    static bool isFlySafe(float x, float y, float z) {
-        return (x > 28.0f - 2.775f && x < 27.5f) &&
-               (y > 0.2f && y < 2.2f) &&
-               (z > 1.7f && z < 3.0f);
+    // ---- 蓝方无人机区域（低Y侧，停机坪上方） ----
+    static bool isFlyBlue(float x, float y, float z) {
+        return (x > 13.5f && x < 27.0f) &&
+               (y > 0.5f && y < 4.5f) &&
+               (z > 1.7f && z < 3.5f);
     }
 
-    static bool isFlyWarn(float x, float y, float z) {
-        return (x > 19.83f && x < 28.0f - 2.7f) &&
-               (y > 0.2f && y < 1.356f + 2.4f + 0.8f) &&
-               (z > 1.7f && z < 3.0f);
-    }
-
-    static bool isFlyAlarm(float x, float y, float z) {
-        return (x > 13.0f && x < 20.5f) &&
-               (y > 0.2f && y < 1.356f + 2.4f + 0.8f) &&
-               (z > 1.7f && z < 3.0f);
+    // ---- 红方无人机区域（高Y侧，停机坪上方） ----
+    static bool isFlyRed(float x, float y, float z) {
+        return (x > 2.0f && x < 14.5f) &&
+               (y > 10.5f && y < 14.3f) &&
+               (z > 1.7f && z < 3.5f);
     }
     //
     pcl::PointCloud<pcl::PointXYZ> extractDynamic(const pcl::PointCloud<pcl::PointXYZ>&cloud,double threshold)
@@ -155,19 +152,17 @@ class DynamicCloudNode : public rclcpp::Node {
     //
     void detectAndLog(const pcl::PointCloud<pcl::PointXYZ>&other_points){
         if(other_points.empty()) return;
-        int dart_cnt=0,safe_cnt = 0, warn_cnt = 0, alarm_cnt = 0;
+        int dart_cnt=0, fly_blue_cnt = 0, fly_red_cnt = 0;
         for (const auto& pt : other_points.points) {
             if (isDartRegion(pt.x, pt.y, pt.z)) dart_cnt++;
-            if (isFlySafe(pt.x, pt.y, pt.z)) safe_cnt++;
-            if (isFlyWarn(pt.x, pt.y, pt.z)) warn_cnt++;
-            if (isFlyAlarm(pt.x, pt.y, pt.z)) alarm_cnt++;
+            if (isFlyBlue(pt.x, pt.y, pt.z))  fly_blue_cnt++;
+            if (isFlyRed(pt.x, pt.y, pt.z))   fly_red_cnt++;
         }
 
         if (dart_cnt > 5)   RCLCPP_WARN(this->get_logger(), "发现飞镖！点数: %d", dart_cnt);
-        if (alarm_cnt > 40) RCLCPP_ERROR(this->get_logger(), "🚨 飞机报警区域检测到目标！");
-        else if (warn_cnt > 40) RCLCPP_WARN(this->get_logger(), "⚠️ 飞机警告区域检测到目标！");
-        else if (safe_cnt > 40) RCLCPP_WARN(this->get_logger(), "✈️ 飞机安全区域检测到目标！");
-    }   
+        if (fly_blue_cnt > 40) RCLCPP_WARN(this->get_logger(), "蓝方无人机区域检测到目标！点数: %d", fly_blue_cnt);
+        if (fly_red_cnt  > 40) RCLCPP_WARN(this->get_logger(), "红方无人机区域检测到目标！点数: %d", fly_red_cnt);
+    }
     
     void callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg){
         auto t_start=std::chrono::steady_clock::now();
@@ -211,8 +206,8 @@ class DynamicCloudNode : public rclcpp::Node {
                               (-6.5 - 0.9/sqrt(2)) < (pt.y - pt.x) && (pt.y - pt.x) < (-6.5 + 0.9/sqrt(2)));
 
             bool other_flag = isDartRegion(pt.x, pt.y, pt.z) ||
-                              (pt.x > 13 && pt.x < 27.5 && pt.y > 0.2 &&
-                               pt.y < 1.356 + 2.4 + 0.8 && pt.z > 1.7 && pt.z < 3);
+                              isFlyBlue(pt.x, pt.y, pt.z) ||
+                              isFlyRed(pt.x, pt.y, pt.z);
 
             if (main_cond) {
                 if (other_flag) other.push_back(pt);
@@ -284,8 +279,8 @@ class DynamicCloudNode : public rclcpp::Node {
             lidar_frame_ = "livox";
             map_frame_   = "map";
         }
-        accumulate_time_     = 1;
-        background_threshold_ = 0.1;
+        accumulate_time_     = 3;
+        background_threshold_ = 0.15;
         std::string map_path = "/home/syh/rm_lidar_2027/HNURM-radar-2026/data/pointclouds/background/RM2025.pcd";
         loadMap(map_path, 0.1f);
         RCLCPP_INFO(this->get_logger(), "Static map loaded: %zu points", map_cloud_->size());

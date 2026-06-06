@@ -1,5 +1,5 @@
 #!/bin/bash
-# bringup_rosbag.sh — Rosbag 回放模式一键启动脚本（含视觉检测）
+# bringup_rosbag.sh — Rosbag 回放模式一键启动脚本（含视觉检测 + 雷达融合）
 #
 # 前置条件：
 #   1. configs/main_config.yaml 中 camera.mode 设为 "rosbag"
@@ -23,9 +23,10 @@ cd ~/rm_lidar_2027/RM_radar_Cpp_2027
 cmds=(
     "ros2 launch livox_ros_driver2 rviz_HAP_launch.py"
     "ros2 run hnurm_radar lidar"
+    "ros2 run hnurm_radar radar"
     "ros2 launch registration registration.launch.py"
-    
-    "ros2 run hnurm_radar detect"             # 新增：视觉检测节点
+    "ros2 run hnurm_radar detect"
+    "ros2 run hnurm_radar display_panel"
     "ros2 bag play /home/syh/下载/全明星赛第一局 --rate 1.0"
 )
 

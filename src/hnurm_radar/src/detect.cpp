@@ -12,6 +12,8 @@
 #include <thread>
 #include <mutex>
 #include <deque>
+#include <unordered_map>
+#include <map>
 #include <condition_variable>
 #include <chrono>
 #include <filesystem>
@@ -27,6 +29,7 @@
 
 #include "hnurm_radar/infer.hpp"
 #include "hnurm_radar/HomographyTransformer.hpp"
+#include "hnurm_radar/tracker.hpp"
 
 using namespace std::chrono_literals;
 
@@ -63,6 +66,7 @@ public:
         std::string calib_json = "configs/perspective_calib.json";
         std::string mask_img_path = "data/maps/competition_2026/pfa_map_mask_2025.jpg";
         homography_ = std::make_shared<HomographyTransformer>(calib_json, mask_img_path);
+    obj_tracker_ = std::make_unique<ObjectTracker>(0.3f, 30, 3);
 
         // 小地图
         std::string scene = main_cfg["global"]["scene"].as<std::string>("competition");
@@ -94,7 +98,7 @@ public:
                 sub_image_ = create_subscription<sensor_msgs::msg::Image>(
                     "image", qos, std::bind(&DetectorNode::image_callback, this, std::placeholders::_1));
             }
-            for (int i = 0; i < 4; ++i) {
+            for (int i = 0; i < 1; ++i) {
                 decode_threads_.emplace_back(&DetectorNode::decode_worker, this);
             }
         }
@@ -251,13 +255,21 @@ private:
     // ---------- 主处理线程 ----------
     void process_loop() {
         while (rclcpp::ok() && !stop_process_) {
-            std::unique_lock<std::mutex> lock(process_mutex_);
-            process_cv_.wait(lock, [this] { return !process_queue_.empty() || stop_process_; });
-            if (stop_process_) break;
-            cv::Mat frame = std::move(process_queue_.front());
-            process_queue_.pop_front();
-            lock.unlock();
-
+            cv::Mat frame;
+            {
+                std::unique_lock<std::mutex> lock(process_mutex_);
+                // 先检查队列是否有帧
+                if (process_queue_.empty()) {
+                    // 没有帧就释放锁等 notify，但设 2ms 超时防止死等
+                    process_cv_.wait_for(lock, 2ms);
+                }
+                if (process_queue_.empty()) {
+                    continue;
+                }
+                // 取最新帧，丢弃积压的旧帧
+                frame = std::move(process_queue_.back());
+                process_queue_.clear();
+            }
             process_frame(frame);
         }
     }
@@ -306,18 +318,118 @@ private:
                         cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
         }
 
-        // 发布检测结果
-        detect_result::msg::Robots robots_msg;
+        // ===== 帧间追踪器（对车辆框做追踪，每个 track 代表一辆车） =====
+        // 获取车辆底部中心点（1280x1280坐标系）
+        const auto& car_bottoms = infer_engine_->getLastCarBottomPts();
+
+        // 用车辆框做追踪
+        std::vector<cv::Rect> car_track_rects;
+        std::vector<std::string> car_track_labels;
+        std::vector<cv::Point2f> car_track_bottoms;
+        for (size_t i = 0; i < car_boxes.size(); ++i) {
+            car_track_rects.push_back(car_boxes[i]);
+            car_track_labels.push_back("car");
+            if (i < car_bottoms.size()) {
+                car_track_bottoms.emplace_back(car_bottoms[i].first, car_bottoms[i].second);
+            } else {
+                car_track_bottoms.emplace_back(
+                    (car_boxes[i].x + car_boxes[i].width / 2.0f),
+                    (car_boxes[i].y + car_boxes[i].height)
+                );
+            }
+        }
+
+        // 追踪器更新，得到带 track_id 的车辆轨迹
+        auto car_tracked = obj_tracker_->update(car_track_rects, car_track_labels, car_track_bottoms);
+
+        // 将车辆 track_id 回写到每个 armor
+        for (auto& ar : armors) {
+            int best_match = -1;
+            float best_iou = 0.0f;
+            float ar_cx = (ar.abs_rect.x + ar.abs_rect.width / 2.0f) / scale_x;
+            float ar_cy = (ar.abs_rect.y + ar.abs_rect.height / 2.0f) / scale_y;
+            cv::Point2f ar_center(ar_cx, ar_cy);
+
+            for (const auto& tr : car_tracked) {
+                if (tr.last_rect.contains(ar_center)) {
+                    cv::Rect armor_in_1280(
+                        ar.abs_rect.x / scale_x,
+                        ar.abs_rect.y / scale_y,
+                        ar.abs_rect.width / scale_x,
+                        ar.abs_rect.height / scale_y
+                    );
+                    cv::Rect inter = tr.last_rect & armor_in_1280;
+                    float iou_val = (float)inter.area() / (float)(tr.last_rect.area() + armor_in_1280.area() - inter.area());
+                    if (iou_val > best_iou) {
+                        best_iou = iou_val;
+                        best_match = tr.track_id;
+                    }
+                }
+            }
+            ar.track_id = best_match;
+        }
+
+        // T-DT方式：按 track_id 分组，每辆车只选置信度最高且数字非0非5的 armor
+        std::map<int, const InferArmor*> best_armor_per_car;
         for (const auto& ar : armors) {
+            if (ar.label.size() < 2) continue;
+            std::string num_part = ar.label.substr(1);
+            int digit_idx = -1;
+            for (int i = 0; i < (int)labels_.size(); ++i) {
+                if (labels_[i] == num_part) { digit_idx = i; break; }
+            }
+            // T-DT: 忽略 class_label=0(unknown) 和 5(background)
+            if (digit_idx == 0 || digit_idx == 5) continue;
+            if (ar.track_id < 0) continue;
+            auto it = best_armor_per_car.find(ar.track_id);
+            if (it == best_armor_per_car.end() || ar.conf > it->second->conf) {
+                best_armor_per_car[ar.track_id] = &ar;
+            }
+        }
+
+        // 颜色+数字判定：逐帧观察 → 时序多数投票，消除突变
+        detect_result::msg::Robots robots_msg;
+        // 清理消失的 track 历史：连续 miss >= 5 帧才删除
+        for (auto it = track_histories_.begin(); it != track_histories_.end(); ) {
+            if (best_armor_per_car.find(it->first) == best_armor_per_car.end()) {
+                it->second.markMissed();
+                if (it->second.missed >= 5)
+                    it = track_histories_.erase(it);
+                else ++it;
+            } else ++it;
+        }
+        for (auto& [tid, ar] : best_armor_per_car) {
+            cv::Rect safe_rect = ar->abs_rect & cv::Rect(0, 0, frame.cols, frame.rows);
+            if (safe_rect.width <= 0 || safe_rect.height <= 0) continue;
+            cv::Mat armor_roi = frame(safe_rect);
+            std::vector<cv::Mat> channels;
+            cv::split(armor_roi, channels);
+            cv::Mat blueMinusRed = channels[0] - channels[2];
+            cv::Mat redMinusBlue = channels[2] - channels[0];
+            double avgBMR = cv::mean(blueMinusRed)[0];
+            double avgRMB = cv::mean(redMinusBlue)[0];
+            char per_frame_color = (avgBMR > avgRMB) ? 'B' : 'R';
+            std::string per_frame_digit = (ar->label.size() >= 2) ? ar->label.substr(1) : "";
+
+            // 写入时序历史
+            auto& hist = track_histories_[tid];
+            hist.add(per_frame_color, per_frame_digit);
+
+            // 用多数投票取稳定值
+            char stable_color = hist.stableColor();
+            std::string stable_digit = hist.stableDigit();
+            std::string final_label = stable_color + stable_digit;
+
             detect_result::msg::DetectResult dr;
-            dr.xyxy_box = {ar.abs_rect.x, ar.abs_rect.y,
-                           ar.abs_rect.x + ar.abs_rect.width,
-                           ar.abs_rect.y + ar.abs_rect.height};
-            dr.label = ar.label;
-            dr.field_x = ar.field_x;
-            dr.field_y = ar.field_y;
+            dr.xyxy_box = {ar->abs_rect.x, ar->abs_rect.y,
+                           ar->abs_rect.x + ar->abs_rect.width,
+                           ar->abs_rect.y + ar->abs_rect.height};
+            dr.label = final_label;
+            dr.field_x = ar->field_x;
+            dr.field_y = ar->field_y;
             robots_msg.detect_results.push_back(dr);
         }
+        robots_msg_count_ += robots_msg.detect_results.size();
         pub_result_->publish(robots_msg);
 
         // 显示任务
@@ -392,6 +504,9 @@ private:
 
     void print_stats() {
         if (frame_count_ == 0) return;
+        RCLCPP_INFO(get_logger(),
+            "[Detect统计] 过去5秒处理帧数:%d  平均FPS:%.1f  detect_result发布数:%d",
+            frame_count_, frame_count_ / 5.0, (int)robots_msg_count_);
         double avg_car_pre  = car_pre_time_  / frame_count_;
         double avg_car_inf  = car_inf_time_  / frame_count_;
         double avg_car_post = car_post_time_ / frame_count_;
@@ -421,6 +536,7 @@ private:
 
         // 重置计数器
         frame_count_ = 0;
+        robots_msg_count_ = 0;
         car_pre_time_ = car_inf_time_ = car_post_time_ = 0.0;
         armor_pre_time_ = armor_post_time_ = digit_time_ = 0.0;
         frame_time_ = 0.0;
@@ -434,8 +550,37 @@ private:
     std::vector<std::string> labels_;
 
     std::unique_ptr<InferEngine> infer_engine_;
+    std::unique_ptr<ObjectTracker> obj_tracker_;
     std::shared_ptr<HomographyTransformer> homography_;
     cv::Mat minimap_img_;
+
+    // 时序颜色/数字过滤：消除逐帧突变
+    struct TrackHistory {
+        std::deque<char> colors;
+        std::deque<std::string> digits;
+        int missed = 0;  // 连续未出现帧数，>=5 才清理
+        static constexpr size_t MAX_HISTORY = 7;
+        void add(char c, const std::string& d) {
+            colors.push_back(c);
+            digits.push_back(d);
+            if (colors.size() > MAX_HISTORY) { colors.pop_front(); digits.pop_front(); }
+            missed = 0;
+        }
+        void markMissed() { missed++; }
+        char stableColor() const {
+            int r = 0, b = 0;
+            for (char c : colors) { if (c == 'R') r++; else if (c == 'B') b++; }
+            return (r > b) ? 'R' : 'B';
+        }
+        std::string stableDigit() const {
+            std::map<std::string, int> cnt;
+            for (auto& d : digits) cnt[d]++;
+            std::string best; int bc = 0;
+            for (auto& [d, c] : cnt) if (c > bc) { bc = c; best = d; }
+            return best;
+        }
+    };
+    std::unordered_map<int, TrackHistory> track_histories_;
 
     rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_compressed_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_image_;
@@ -474,6 +619,7 @@ private:
 
     // 细粒度统计累加器
     int frame_count_ = 0;
+    int robots_msg_count_ = 0;
     double car_pre_time_ = 0.0, car_inf_time_ = 0.0, car_post_time_ = 0.0;
     double armor_pre_time_ = 0.0, armor_post_time_ = 0.0, digit_time_ = 0.0;
     double frame_time_ = 0.0;

@@ -10,6 +10,7 @@ struct InferArmor {
     cv::Rect abs_rect;          // 原图绝对坐标
     std::string label;
     float conf;
+    int track_id = -1;          // 追踪器分配的帧间ID（由 DetectorNode 填充）
     float field_x = 0.0f;
     float field_y = 0.0f;
     bool valid_field = false;
@@ -30,6 +31,7 @@ public:
 
     // 获取最近一次推理的车辆框（1280x1280坐标）
     const std::vector<cv::Rect>& getLastCarBoxes() const { return car_boxes_; }
+    const std::vector<std::pair<float,float>>& getLastCarBottomPts() const { return car_bottom_pts_; }
 
     // ========= 细粒度耗时接口 =========
     float getLastCarPreprocessTime()    const { return last_car_preprocess_time_; }
@@ -57,6 +59,7 @@ private:
     cudaStream_t stream_;
     uint8_t *d_scratch_car_;
     uint8_t *d_scratch_armor_;
+    uint8_t *d_scratch_digit_;
 
     float conf_car_;
     float conf_armor_;
@@ -77,3 +80,5 @@ private:
     float last_digit_total_time_       = 0.0f;
     float last_total_time_             = 0.0f;
 };
+
+

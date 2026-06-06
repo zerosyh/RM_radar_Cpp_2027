@@ -1,0 +1,74 @@
+# ============================================================
+# converter_config_rosbag.yaml — T-DT rosbag 专用融合参数
+# ============================================================
+# 来源：T-DT_Radar/config/camera_params.yaml + out_matrix.yaml
+#
+# 外参推导方法（scripts/derive_lidar_camera_extrinsic.py）：
+#   T_lidar→camera = T_world→camera (solvePnP) × T_lidar→world (GICP)
+#   - T_world→camera: out_matrix.yaml 的 rvec/tvec
+#   - T_lidar→world:  对 rosbag 点云与 RM2025.pcd 做 GICP 配准
+#   推导出的 R 与 hnurm 自身标定值角度差仅 1.91°，结构一致。
+# ============================================================
+
+params:
+  max_depth: 30          # 最大深度（m），赛场28m，留余量
+  width: 4096            # T-DT 相机分辨率宽度（根据 cx≈2047 推算为 4096 像素）
+  height: 3000           # T-DT 相机分辨率高度（根据 cy≈1515 推算为 3000 像素）
+
+calib:
+  extrinsic:
+    # 初始外参：与 --identity-init 保持一致
+    # 相机与雷达同位置（零平移），仅保留坐标轴转换
+    # cam_X = -lidar_Y, cam_Y = -lidar_Z, cam_Z = lidar_X
+    R:
+      rows: 3
+      cols: 3
+      dt: d
+      data: [0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0]
+    T:
+      rows: 3
+      cols: 1
+      dt: d
+      # 与雷达同位置
+      data: [0.0, 0.0, 0.0]
+  intrinsic:
+    # T-DT 相机内参（来自 T-DT_Radar/config/camera_params.yaml）
+    cx: 2046.972383
+    cy: 1515.242535
+    fx: 3617.422853
+    fy: 3617.561167
+  distortion:
+    # T-DT 畸变系数（来自 T-DT_Radar/config/camera_params.yaml）
+    rows: 1
+    cols: 5
+    dt: d
+    data: [-0.064321, 0.114219, -0.000746, 0.000801, 0.000000]
+
+# T-DT 世界坐标系变换参数（来自 out_matrix.yaml）
+# 用于 rosbag 模式下直接从 2D 像素坐标变换到赛场坐标
+# 而不依赖 ICP registration 的 TF
+world_transform:
+  rvec: [1.4991050282713083, -1.2765999291002665, 0.96939795426133368]
+  tvec: [-10.019945443997486, 2.8500528283672280, 3.3869325006721294]
+
+cluster:
+  eps: 0.40
+  min_points: 10
+  print_progress: False
+
+filter:
+  nb_neighbors: 20
+  std_ratio: 2.0
+  voxel_size: 0.035
+
+field:
+  Red:
+    left_up: [0., 5233, 800]
+    left_down: [0., 5233, 0]
+    right_down: [4063, 4464, 0]
+    right_up: [4063, 4464, 305]
+  Blue:
+    left_up: [0., 5233, 800]
+    left_down: [0., 5233, 0]
+    right_down: [4063, 4464, 0]
+    right_up: [4063, 4464, 305]

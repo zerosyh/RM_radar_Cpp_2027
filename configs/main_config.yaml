@@ -18,7 +18,7 @@ initial_pose:
 
 global:
   my_color: "Blue" # "Blue"
-  is_debug: true # False
+  is_debug: True # False
   scene: "competition"  # "competition" = 赛场（28x15m）| "lab" = 实验室测试
   # 调试坐标发布开关
   # true  = 调试模式: 地面方案二和空中检测的所有坐标都经 location→EKF 发布（含非标准ID映射）

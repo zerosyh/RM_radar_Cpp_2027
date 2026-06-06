@@ -171,11 +171,13 @@ InferEngine::InferEngine(const std::string& stage1_path,
     cudaStreamCreate(&stream_);
     cudaMalloc(&d_scratch_car_, 1280 * 1280 * 3);
     cudaMalloc(&d_scratch_armor_, 192 * 192 * 3);
+    cudaMalloc(&d_scratch_digit_, 192 * 192 * 3);
 }
 
 InferEngine::~InferEngine() {
     if (d_scratch_car_)  cudaFree(d_scratch_car_);
     if (d_scratch_armor_) cudaFree(d_scratch_armor_);
+    if (d_scratch_digit_) cudaFree(d_scratch_digit_);
     if (stream_) cudaStreamDestroy(stream_);
     delete runtime_;
 }
@@ -231,9 +233,10 @@ std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
     for (size_t i = 0; i < car_boxes_.size(); ++i) {
         cv::Rect car_exp = expand_bbox(car_boxes_[i], 1.2f, 1280, 1280);
         cv::Mat car_roi = frame_resized(car_exp);
+        if (car_roi.empty()) continue;
         cv::Mat car_roi_rgb;
         cv::cvtColor(car_roi, car_roi_rgb, cv::COLOR_BGR2RGB);
-        preprocess_on_gpu_ex(car_roi_rgb, static_cast<float*>(engine_armor_.d_input), 192, 192, stream_, d_scratch_car_);
+        preprocess_on_gpu_ex(car_roi_rgb, static_cast<float*>(engine_armor_.d_input), 192, 192, stream_, d_scratch_armor_);
         engine_armor_.context->enqueueV3(stream_);
         cudaMemcpyAsync(armor_host_buffers_[i].data(), engine_armor_.d_output, engine_armor_.outputSize, cudaMemcpyDeviceToHost, stream_);
     }
@@ -273,22 +276,17 @@ std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
             cv::Rect a_exp = expand_bbox(a_rect_1280, 1.1f, car_roi.cols, car_roi.rows);
             cv::Mat armor_roi = car_roi(a_exp);
             cv::Mat armor_roi_rgb;
+            if (armor_roi.empty()) continue;
             cv::cvtColor(armor_roi, armor_roi_rgb, cv::COLOR_BGR2RGB);
 
-            size_t classify_scratch_size = armor_roi_rgb.total() * 3;
-            uint8_t* d_classify_scratch = nullptr;
-            cudaMallocAsync(&d_classify_scratch, classify_scratch_size, stream_);
-
             auto t_digit_start = std::chrono::steady_clock::now();
-            // 数字分类模型输入尺寸为 64x64
-            preprocess_classify_on_gpu_ex(armor_roi_rgb, static_cast<float*>(engine_digit_.d_input), 64, 64, stream_, d_classify_scratch);
+            // 数字分类模型输入尺寸为 64x64，复用预分配 scratch buffer
+            preprocess_classify_on_gpu_ex(armor_roi_rgb, static_cast<float*>(engine_digit_.d_input), 64, 64, stream_, d_scratch_digit_);
             engine_digit_.context->enqueueV3(stream_);
             cudaMemcpyAsync(engine_digit_.hostOutput.data(), engine_digit_.d_output, engine_digit_.outputSize, cudaMemcpyDeviceToHost, stream_);
             cudaStreamSynchronize(stream_);
             auto t_digit_end = std::chrono::steady_clock::now();
             digit_total_time += std::chrono::duration<float, std::milli>(t_digit_end - t_digit_start).count();
-
-            cudaFreeAsync(d_classify_scratch, stream_);
 
             // 概率计算
             std::vector<float> probs(engine_digit_.hostOutput.begin(), engine_digit_.hostOutput.begin() + engine_digit_.outDim1);
