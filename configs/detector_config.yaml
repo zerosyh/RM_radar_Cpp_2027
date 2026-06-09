@@ -8,7 +8,7 @@ path:
 
 params:
   labels: ["1","2","3","4","S","Q"]
-  stage_one_conf: 0.60
+  stage_one_conf: 0.57
   stage_two_conf: 0.5
   stage_three_conf: 0.5
   life_time: 90                       # 生命周期

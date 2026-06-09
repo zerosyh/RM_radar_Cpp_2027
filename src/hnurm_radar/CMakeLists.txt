@@ -177,9 +177,22 @@ ament_target_dependencies(
 )
 target_link_libraries(display_panel ${OpenCV_LIBS} yaml-cpp)
 
+# --- sentry_decision 哨兵决策辅助 ---
+add_executable(sentry_decision src/sentry_decision.cpp)
+target_include_directories(sentry_decision PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(sentry_decision PUBLIC c_std_99 cxx_std_17)
+ament_target_dependencies(
+  sentry_decision
+  "rclcpp"
+  "detect_result"
+)
+target_link_libraries(sentry_decision yaml-cpp ${OpenCV_LIBS})
+
 
 # --------------- 安装 ---------------
-install(TARGETS  lidar hik_camera_node detect radar display_panel
+install(TARGETS  lidar hik_camera_node detect radar display_panel sentry_decision
   DESTINATION lib/${PROJECT_NAME})
 
 # 安装模型和配置等资源

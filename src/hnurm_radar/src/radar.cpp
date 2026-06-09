@@ -90,6 +90,11 @@ struct KalmanFilterPlus {
     bool   has_updated = false;
     int    hits = 1;
 
+    static double now_sec() {
+        return std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
     KalmanFilterPlus(const pcl::PointXY& input, float)
         : last_time(0), delete_time(2.0f), detect_r(1.0f), car_max_speed(2.5f)
         , dt_(0.1f), sigma_q_x(50.0f), sigma_q_y(50.0f), sigma_r_x(0.1f), sigma_r_y(0.1f)
@@ -119,6 +124,7 @@ struct KalmanFilterPlus {
         KF.measurementNoiseCov = (cv::Mat_<float>(2,2) << sigma_r_x, 0, 0, sigma_r_y);
         cv::setIdentity(KF.errorCovPost, cv::Scalar::all(1));
         has_updated = true;
+        history.push_back({now_sec(), input});  // T-DT: 构造函数初始化 history
     }
 
     float get_time() {
@@ -127,33 +133,24 @@ struct KalmanFilterPlus {
         return d.count() / 1000.0;
     }
 
-    // T-DT: predict，超界则钳位 + 清零速度防止漂移
+    // T-DT: predict
     void update_predict_point() {
         dt_ = get_time();
         timer = std::chrono::steady_clock::now();
         auto result = KF.predict();
         last_time += dt_;
-        float px = result.at<float>(0);
-        float py = result.at<float>(2);
-        if (px < -2.0f || px > 30.0f || py < -2.0f || py > 17.0f) {
-            // 漂出场外：钳位并重置速度
-            predict_point.x = std::clamp(px, -2.0f, 30.0f);
-            predict_point.y = std::clamp(py, -2.0f, 17.0f);
-            KF.statePost.at<float>(1) = 0.0f;
-            KF.statePost.at<float>(3) = 0.0f;
-        } else {
-            predict_point.x = px;
-            predict_point.y = py;
-        }
+        predict_point.x = result.at<float>(0);
+        predict_point.y = result.at<float>(2);
     }
 
     bool match(const pcl::PointXY& input) {
         float dx = predict_point.x - input.x;
         float dy = predict_point.y - input.y;
-        return std::sqrt(dx*dx + dy*dy) < car_max_speed * dt_ + detect_r;
+        float eff_dt = std::min(dt_, 0.3f);
+        return std::sqrt(dx*dx + dy*dy) < car_max_speed * eff_dt + detect_r;
     }
 
-    // T-DT: KF.correct + 记录雷达点时间序列
+    // T-DT: KF.correct + 记录雷达点 (绝对时间戳，对齐 T-DT)
     void update(const pcl::PointXY& input) {
         cv::Mat meas(2, 1, CV_32F);
         meas.at<float>(0) = input.x;
@@ -164,16 +161,15 @@ struct KalmanFilterPlus {
         has_updated = true;
         last_time = 0;
         hits++;
-        // T-DT: 记录雷达点时间序列，供 cameraMatch 时间对齐
-        history.push_back({get_time(), input});
+        history.push_back({now_sec(), input});
         if (history.size() > MAX_HISTORY) history.pop_front();
     }
 
-    // T-DT 时间匹配: 找 history 中时间最近的点，时间差 <1s 且空间距离 <detect_r
+    // T-DT 时间匹配: 找 history 中绝对时间最近的点
     void cameraMatch(float field_x, float field_y, int color, int number) {
         if (history.empty()) return;
         const double TIME_THRESHOLD = 1.0;
-        double now_t = get_time();
+        double now_t = now_sec();
         double best_differ = 1e9;
         pcl::PointXY best_point = history.front().second;
         for (auto& [t, pt] : history) {
@@ -272,7 +268,7 @@ public:
         sub_other_ = create_subscription<sensor_msgs::msg::PointCloud2>(
             "livox/lidar_other", qr, std::bind(&RadarNode::otherCb, this, std::placeholders::_1));
         cluster_air_ = std::make_unique<DBSCANCluster>(kf_air_dbscan_eps_, kf_air_dbscan_min_);
-        pub_loc_ = create_publisher<detect_result::msg::Locations>("location", qos);
+        pub_loc_ = create_publisher<detect_result::msg::Locations>("location", qr);
         if (mode == "rosbag") {
             auto t = main_cfg["camera"]["compressed_image_topic"].as<std::string>("/compressed_image");
             sub_comp_ = create_subscription<sensor_msgs::msg::CompressedImage>(

@@ -43,12 +43,15 @@ public:
             cv::resize(map_img_, map_img_, cv::Size(map_px_w_, map_px_h_));
         }
 
-        rclcpp::QoS qos(rclcpp::KeepLast(3));
-        qos.best_effort();
+        rclcpp::QoS qos(rclcpp::KeepLast(10));
+        qos.reliable();
 
         sub_location_ = create_subscription<detect_result::msg::Locations>(
             "location", qos,
             std::bind(&DisplayPanel::locationCb, this, std::placeholders::_1));
+        sub_sentry_ = create_subscription<detect_result::msg::Locations>(
+            "sentry_targets", qos,
+            std::bind(&DisplayPanel::sentryCb, this, std::placeholders::_1));
 
         rclcpp::QoS pub_qos(rclcpp::KeepLast(1));
         pub_qos.reliable();
@@ -70,6 +73,10 @@ private:
     void locationCb(const detect_result::msg::Locations::SharedPtr msg) {
         std::lock_guard<std::mutex> l(mtx_);
         latest_locs_ = *msg;
+    }
+    void sentryCb(const detect_result::msg::Locations::SharedPtr msg) {
+        std::lock_guard<std::mutex> l(sentry_mtx_);
+        sentry_locs_ = *msg;
     }
 
     void drawRobotMarker(cv::Mat& img, int xx, int yy, const cv::Scalar& color, bool is_air, float z) {
@@ -94,10 +101,14 @@ private:
         const int PUB_EVERY_N = 5;
 
         while (rclcpp::ok() && running_) {
-            detect_result::msg::Locations locs_copy;
+            detect_result::msg::Locations locs_copy, sentry_copy;
             {
                 std::lock_guard<std::mutex> l(mtx_);
                 locs_copy = latest_locs_;
+            }
+            {
+                std::lock_guard<std::mutex> l(sentry_mtx_);
+                sentry_copy = sentry_locs_;
             }
 
             cv::Mat show_map = map_img_.clone();
@@ -158,6 +169,66 @@ private:
                 }
             }
 
+            // ---- 哨兵决策标记 ----
+            // 先找哨兵位置 + PATH 点
+            int sentry_px = map_px_w_ / 2, sentry_py = map_px_h_ / 2;
+            int atk_px = -1, atk_py = -1;
+            std::vector<cv::Point> path_pts;
+            for (const auto& loc : sentry_copy.locs) {
+                if (loc.label == "SENTRY") {
+                    sentry_px = static_cast<int>(loc.x * 100);
+                    sentry_py = map_px_h_ - static_cast<int>(loc.y * 100);
+                } else if (loc.label == "ATTACK") {
+                    atk_px = static_cast<int>(loc.x * 100);
+                    atk_py = map_px_h_ - static_cast<int>(loc.y * 100);
+                } else if (loc.label == "PATH") {
+                    path_pts.push_back({static_cast<int>(loc.x * 100),
+                                        map_px_h_ - static_cast<int>(loc.y * 100)});
+                }
+            }
+            // 画路径线: 哨兵 → PATH → 攻击目标
+            if (!path_pts.empty()) {
+                path_pts.insert(path_pts.begin(), cv::Point(sentry_px, sentry_py));
+                if (atk_px >= 0) path_pts.push_back(cv::Point(atk_px, atk_py));
+                for (size_t pi = 1; pi < path_pts.size(); ++pi)
+                    cv::line(show_map, path_pts[pi-1], path_pts[pi], cv::Scalar(255, 100, 0), 3);
+            }
+            for (const auto& loc : sentry_copy.locs) {
+                float x = loc.x, y = loc.y;
+                int xx = static_cast<int>(x * 100);
+                int yy = map_px_h_ - static_cast<int>(y * 100);
+
+                // ---- 警戒方向箭头 ----
+                if (loc.label == "ALERT") {
+                    cv::Scalar yellow(0, 255, 255);
+                    cv::arrowedLine(show_map, cv::Point(sentry_px, sentry_py),
+                                    cv::Point(xx, yy), yellow, 3);
+                // ---- 哨兵位置 ----
+                } else if (loc.label == "SENTRY") {
+                    cv::Scalar white(255, 255, 255);
+                    cv::circle(show_map, cv::Point(xx, yy), 15, white, -1);
+                    cv::putText(show_map, "S", cv::Point(xx - 8, yy + 8),
+                                cv::FONT_HERSHEY_SIMPLEX, 0.6, white, 2);
+                // ---- 模式标签 (id=902) ----
+                } else if (loc.id == 902) {
+                    cv::Scalar c = (loc.label == "DEF") ? cv::Scalar(0, 255, 255)
+                                                         : cv::Scalar(0, 0, 255);
+                    cv::putText(show_map, loc.label, cv::Point(xx - 20, yy),
+                                cv::FONT_HERSHEY_SIMPLEX, 1.2, c, 3);
+                // ---- NAV 导航点 (id=801 或 label=NAV) ----
+                } else if (loc.id == 801 || loc.label == "NAV") {
+                    cv::Scalar green(0, 255, 0);
+                    std::vector<cv::Point> diamond = {
+                        {xx, yy - 25}, {xx + 25, yy}, {xx, yy + 25}, {xx - 25, yy}
+                    };
+                    cv::polylines(show_map, diamond, true, green, 3);
+                    if (loc.id == 801) {
+                        cv::putText(show_map, loc.label, cv::Point(xx + 20, yy),
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.7, green, 2);
+                    }
+                }
+            }
+
             cv::imshow("map", show_map);
             cv::waitKey(16);
 
@@ -188,9 +259,12 @@ private:
     cv::Mat map_img_;
 
     detect_result::msg::Locations latest_locs_;
+    detect_result::msg::Locations sentry_locs_;
     std::mutex mtx_;
+    std::mutex sentry_mtx_;
 
     rclcpp::Subscription<detect_result::msg::Locations>::SharedPtr sub_location_;
+    rclcpp::Subscription<detect_result::msg::Locations>::SharedPtr sub_sentry_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pub_map_view_;
 
     std::thread display_thread_;
@@ -200,7 +274,9 @@ private:
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<DisplayPanel>();
-    rclcpp::spin(node);
+    rclcpp::executors::MultiThreadedExecutor exec(rclcpp::ExecutorOptions(), 2);
+    exec.add_node(node);
+    exec.spin();
     rclcpp::shutdown();
     return 0;
 }

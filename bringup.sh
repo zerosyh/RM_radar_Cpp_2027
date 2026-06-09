@@ -26,6 +26,7 @@ cmds=(
     "ros2 run hnurm_radar radar"
     "ros2 launch registration registration.launch.py"
     "ros2 run hnurm_radar detect"
+    "ros2 run hnurm_radar sentry_decision"
     "ros2 run hnurm_radar display_panel"
     "ros2 bag play /home/syh/下载/全明星赛第一局 --rate 1.0"
 )

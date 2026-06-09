@@ -280,7 +280,7 @@ class DynamicCloudNode : public rclcpp::Node {
             map_frame_   = "map";
         }
         accumulate_time_     = 3;
-        background_threshold_ = 0.15;
+        background_threshold_ = 0.20;
         std::string map_path = "/home/syh/rm_lidar_2027/HNURM-radar-2026/data/pointclouds/background/RM2025.pcd";
         loadMap(map_path, 0.1f);
         RCLCPP_INFO(this->get_logger(), "Static map loaded: %zu points", map_cloud_->size());
