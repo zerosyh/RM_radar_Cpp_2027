@@ -115,10 +115,9 @@ RelocaliztionNode::RelocaliztionNode(const rclcpp::NodeOptions &options)
     std::bind(&RelocaliztionNode::pointcloud_sub_callback,this,std::placeholders::_1)
   );
 
-  // 修改：移除 .transient_local()，使用与 rviz2 兼容的 QoS (reliable, keep_last)
   init_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
     "/initialpose",
-    rclcpp::QoS(rclcpp::KeepLast(1)).reliable(),
+    rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
     std::bind(&RelocaliztionNode::initial_pose_callback,this,std::placeholders::_1)
   );
 
@@ -130,10 +129,11 @@ RelocaliztionNode::RelocaliztionNode(const rclcpp::NodeOptions &options)
   
 }
 
-// 修改：无条件保存从 /initialpose 收到的位姿，确保纯小gicp模式能得到初始猜测
 void RelocaliztionNode::initial_pose_callback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
 {
-  geometry_msgs::msg::Transform trans_;
+  if(use_fixed_&&get_first_tf_from_quatro_)  //enable reset initial pose
+  {
+    geometry_msgs::msg::Transform trans_;
   trans_.translation.x = msg->pose.pose.position.x;
   trans_.translation.y = msg->pose.pose.position.y;
   trans_.translation.z = msg->pose.pose.position.z;
@@ -142,9 +142,10 @@ void RelocaliztionNode::initial_pose_callback(const geometry_msgs::msg::PoseWith
   trans_.rotation.y = msg->pose.pose.orientation.y;
   trans_.rotation.z = msg->pose.pose.orientation.z;
   initial_guess_ = tf2::transformToEigen(trans_);
-  getInitialPose_ = true;
-  using_config_initial_guess_ = false; // 标记为手动给定位姿
+  // guesses_ = generate_initial_guesses(initial_guess_,0.5,M_PI/6);
 
+  getInitialPose_ = true;
+  using_config_initial_guess_ = false;
   RCLCPP_INFO(get_logger(), "Received initial pose:");
   RCLCPP_INFO(get_logger(), "  Position: [%.2f, %.2f, %.2f]", 
     msg->pose.pose.position.x, 
@@ -155,6 +156,14 @@ void RelocaliztionNode::initial_pose_callback(const geometry_msgs::msg::PoseWith
     msg->pose.pose.orientation.y,
     msg->pose.pose.orientation.z,
     msg->pose.pose.orientation.w);
+
+  }
+  else   
+  {
+    RCLCPP_INFO(get_logger(), "waiting for quatro++ calculation");
+    getInitialPose_ = true;
+  }
+
 }
 
 std::vector<Eigen::Isometry3d> RelocaliztionNode::generate_initial_guesses(const Eigen::Isometry3d& initial_pose, double trans_noise,double rot_noise)

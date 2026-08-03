@@ -276,7 +276,7 @@ class DynamicCloudNode : public rclcpp::Node {
             lidar_frame_ = camera_cfg["tf_source_frame"].as<std::string>("livox_frame");
             map_frame_    = camera_cfg["tf_target_frame"].as<std::string>("map");
         } else {
-            lidar_frame_ = "livox";
+            lidar_frame_ = "livox_frame";
             map_frame_   = "map";
         }
         accumulate_time_     = 3;

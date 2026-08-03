@@ -191,8 +191,21 @@ ament_target_dependencies(
 target_link_libraries(sentry_decision yaml-cpp ${OpenCV_LIBS})
 
 
+# --- judge_messager 裁判系统通信 ---
+add_executable(judge_messager src/judge_messager.cpp)
+target_include_directories(judge_messager PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(judge_messager PUBLIC c_std_99 cxx_std_17)
+ament_target_dependencies(
+  judge_messager
+  "rclcpp"
+  "detect_result"
+)
+target_link_libraries(judge_messager yaml-cpp)
+
 # --------------- 安装 ---------------
-install(TARGETS  lidar hik_camera_node detect radar display_panel sentry_decision
+install(TARGETS  lidar hik_camera_node detect radar display_panel sentry_decision judge_messager
   DESTINATION lib/${PROJECT_NAME})
 
 # 安装模型和配置等资源

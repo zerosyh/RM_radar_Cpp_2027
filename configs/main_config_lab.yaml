@@ -1,0 +1,143 @@
+# 配准初始位姿（根据雷达物理安装位置在PCD地图中的大致坐标）
+# PCD 地图坐标系 = 裁判系统坐标系（红方补给站为原点，X朝蓝方，Y朝红方停机坪）
+# 根据 my_color 自动选择对应初始位姿，引导 ICP 收敛到正确方向
+# 配准初始位姿（根据雷达物理安装位置在PCD地图中的大致坐标）
+# PCD 地图坐标系 = 裁判系统坐标系（红方补给站为原点，X朝蓝方，Y朝红方停机坪）
+# 根据 my_color 自动选择对应初始位姿，引导 ICP 收敛到正确方向
+
+
+global:
+  my_color: "Blue" # "Blue"
+  is_debug: True # False
+  scene: "lab"  # "competition" = 赛场（28x15m）| "lab" = 实验室测试
+  # 调试坐标发布开关
+  # true  = 调试模式: 地面方案二和空中检测的所有坐标都经 location→EKF 发布（含非标准ID映射）
+  # false = 赛场模式: 仅标准 ID (1-7/101-107) 经 EKF 发布, 其余全部丢弃, 杜绝干扰项
+  # ⚠ 比赛时必须设为 false!
+  debug_coordinate_publish: true
+
+# 场景配置：不同场景使用不同的地图和点云文件
+# 切换场景只需修改 global.scene，无需替换文件
+scenes:
+  competition:
+    std_map: "source/maps/competition_2026/std_map.png"              # 方案二display_panel 底图
+    pfa_map: "source/maps/competition_2026/pfa_map_2025.jpg"         # 方案一透视标定用地图（通用）
+    pfa_map_red: "source/maps/competition_2026/pfa_map_red_2025.jpg"   # 红方视角地图（标定/小地图用）
+    pfa_map_blue: "source/maps/competition_2026/pfa_map_blue_2025.jpg" # 蓝方视角地图（标定/小地图用）
+    pcd_file: "source/pointclouds/registration/map.pcd"               # 点云地图
+    downsampled_pcd: "source/pointclouds/registration/map_downsample.pcd"
+    field_width: 28.0                       # 赛场宽度(m)
+    field_height: 15.0                      # 赛场高度(m)
+  lab:
+    std_map: "source/maps/lab/map_2d_cropped.png"        # 实验室 display_panel 底图（裁剪后2800×1500）
+    std_map_grid: "source/maps/lab/map_2d_cropped.png"  # 带坐标网格的版本（调试用）
+    pfa_map: "source/maps/lab/map_2d_cropped.png"        # 实验室透视标定用地图
+    pcd_file: "source/pointclouds/background/background2_aligned.pcd"           # 实验室点云地图
+    downsampled_pcd: "source/pointclouds/background/background2_aligned.pcd"  # 实验室降采样点云地图
+    field_width: 28.0                       # 由标定工具自动更新
+    field_height: 15.0                      # 由标定工具自动更新
+
+# 相机输入配置（用于 camera_detector 和 detector_node 的图像来源）
+camera:
+  mode: "hik"               # "test": 测试模式(静态图片) | "video": USB摄像头/视频文件 | "hik": 海康工业相机 | "rosbag": rosbag回放模式
+  exposure_time: 15000.0       # 曝光时间(μs)。室内建议 15000~25000，室外/赛场建议 5000~10000。过大=过曝，过小=欠曝
+  gain: 20.0                  # 增益(dB)。越大越亮但噪点越多。建议范围 10~25
+  video_source: "test_resources/7.27-华东理工-00.04.40.729-00.28.10.978-seg2.mp4"  # video 模式下的输入源：0=USB摄像头, 或视频文件路径如 "test_resources/video.mp4"（相对于项目根目录）
+  test_image: "/home/syh/rm_lidar_2027/HNURM-radar-2026/data/Window_screenshot_11.04.2026.png"  # test 模式下使用的图片路径（相对于项目根目录）
+  # ---- rosbag 模式配置 ----
+  # 当 mode 设为 "rosbag" 时：
+  #   1. detector_node 不初始化海康相机，改为订阅 compressed_image_topic 获取图像
+  #   2. lidar_node 照常从 /livox/lidar 订阅点云（rosbag 会发布此 topic）
+  #   3. 需要用 ros2 bag play 播放 rosbag，或使用 hnurm_rosbag_launch.py 自动播放
+  #   4. radar.py 自动使用 converter_config_rosbag.yaml（T-DT 相机参数）
+  #   5. TF frame 使用 rosbag 中点云的 frame_id（livox_frame）和目标坐标系（map）
+  rosbag_path: "/home/syh/下载/全明星赛第一局"  # rosbag 目录路径（包含 rosbag.db3 和 metadata.yaml）
+  compressed_image_topic: "/compressed_image"  # rosbag 中压缩图像的 topic 名称
+  # rosbag 中点云的 frame_id，用于 registration TF 查询
+  # T-DT rosbag 使用 "livox_frame"，hnurm 自身使用 "livox"
+  tf_source_frame: "livox_frame"
+  tf_target_frame: "map"
+  # T-DT 赛场的标准点云地图（用于 registration ICP 配准）
+  # 如果有 T-DT 的 RM2025.pcd，可以将其复制到 data/pointclouds/ 目录
+  rosbag_pcd_file: "source/pointclouds/registration/map_downsample.pcd"
+
+
+car:
+  life_span: 20 # 20帧若未刷新则认为不可信
+
+lidar:
+  height_threshold: 5.5 # 还没有量，激光雷达如果点比负1.4小，则认为在地面，不要
+  min_distance: 1 # 去除距离在这个范围以内的接收点云
+  max_distance: 40 # 去除距离在这个范围以外的接收点云
+  lidar_topic_name: "/livox/lidar" # 点云发布话题名字
+  background_map_path: "source/pointclouds/background/background.pcd" # 背景点云地图路径（相对项目根目录）
+  background_threshold: 0.2 # 背景减除阈值（米）
+  voxel_size: 0.1 # 背景地图降采样体素大小（米）
+  publish_projected: true # 是否发布背景减除后的点云到 target_pointcloud
+
+communication:
+  port: '/dev/ttyUSB0' # 串口
+  bps: 115200 # 波特率
+  timex: 0.01 # 超时时间
+
+
+
+area: # 每一个area是一个列表，元素为点的二元组，表示一个凹多边形 , 从左上角逆时针 , 赛场是对称的，红方左下为原点0，0，蓝方右上为28，15
+  hero_times_threshold: 2 # 连续2帧检测到英雄才认为英雄在这个区域
+  send_double_threshold: 10 # 连续10帧检测到英雄启动双倍易伤
+  Blue: # 我方为蓝色时
+    length: 5 # 5个区域
+    area0:
+    - [12.05, 15.0]
+    - [12.05, 14.30]
+    - [13.68, 12.85]
+    - [15.02, 14.27]
+    - [15.02, 15.0]   # 红方英雄下台阶
+    area1:
+    - [13.68, 12.85]
+    - [16.0, 10.0]
+    - [18.0, 10.8]
+    - [15.02, 14.27]   # 红方英雄从台阶到上坡路段
+    area2:
+    - [16.0, 10.0]
+    - [17.6, 8.0]
+    - [19.63, 8.66]
+    - [18.0, 10.8]   # 红方英雄上坡路段
+    area3:
+    - [17.6, 8.0]
+    - [17.6, 6.72]
+    - [19.72, 6.01]
+    - [19.63, 8.66]   # 红方英雄在环高上
+    area4:
+    - [17.6, 6.72]
+    - [15.10, 4.71]
+    - [17.82, 3.65]
+    - [19.72, 6.01]   # 红方英雄在环高下半部分
+  Red: # 我方为红色时
+    length: 5 # 5个区域
+    area0:
+    - [13.36, 1.54]
+    - [13.36, 0.0]
+    - [16.48, 0.0]
+    - [16.48, 1.60]
+    - [14.96, 2.73]   # 蓝方英雄下台阶
+    area1:
+    - [10.44, 4.91]
+    - [13.36, 1.54]
+    - [14.96, 2.73]
+    - [12.45, 5.73]   # 蓝方英雄从台阶到上坡路段
+    area2:
+    - [8.75, 7.18]
+    - [10.44, 4.91]
+    - [12.45, 5.73]
+    - [10.94, 7.79]   # 蓝方英雄上坡路段
+    area3:
+    - [8.75, 9.71]
+    - [8.75, 7.18]
+    - [10.94, 7.79]
+    - [10.94, 9.04]   # 蓝方英雄在环高上
+    area4:
+    - [10.76, 12.23]
+    - [8.75, 9.71]
+    - [10.94, 9.04]
+    - [12.23, 11.13]   # 蓝方英雄在环高下半部分
