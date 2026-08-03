@@ -128,12 +128,13 @@ private:
     std::mutex mtx_;
     detect_result::msg::Locations latest_;
 
-    // ID→槽位: 1→0(Hero), 2→1(Eng), 3→2(Inf3), 4→3(Inf4), 5→4(Inf5), 7→5(Sentry)
-    static int slot(int id) {
+    // 0x0305 兵种槽位(2026 协议 V2.0.0): 英雄/工程/3步/4步/空中/哨兵
+    // 注意: 0x0305 无 5 号步兵位置, 空中为 6 号; 飞镖(8/108)/基地(10/110)/前哨(11/111)不发送
+    static int slotOf(int id) {
         int n = id % 100;
         if (n == 1) return 0; if (n == 2) return 1;
         if (n == 3) return 2; if (n == 4) return 3;
-        if (n == 5) return 4; if (n == 7) return 5;
+        if (n == 6) return 4; if (n == 7) return 5;
         return -1;
     }
 
@@ -171,20 +172,23 @@ private:
                 locs = latest_;
             }
 
-            // 6槽位: [Hero, Eng, Inf3, Inf4, Inf5, Sentry]
-            uint16_t slots[6][2] = {};
+            // 12 槽位(48B): 0-5 对方[英雄/工程/3步/4步/空中/哨兵], 6-11 己方同序
+            // 坐标单位 cm; 全 0 视为该车未发送(协议明示)
+            uint16_t slots[12][2] = {};
             for (auto& l : locs.locs) {
-                if (l.id < 0) continue;
-                int s = slot(l.id);
-                if (s < 0 || s >= 6) continue;
+                if (l.id < 0) continue;  // last_known 不发送
+                bool enemy = (my_color_ == "Red") ? (l.id >= 100) : (l.id < 100 && l.id > 0);
+                int s = slotOf(l.id);
+                if (s < 0) continue;
+                int idx = enemy ? s : 6 + s;
                 int x = static_cast<int>(std::clamp(l.x, 0.0f, field_w_) * 100);
                 int y = static_cast<int>(std::clamp(l.y, 0.0f, field_h_) * 100);
-                slots[s][0] = x; slots[s][1] = y;
+                slots[idx][0] = x; slots[idx][1] = y;
             }
 
-            // 打包 0x0305
+            // 打包 0x0305 (48B)
             std::vector<uint8_t> data;
-            for (int i = 0; i < 6; ++i) {
+            for (int i = 0; i < 12; ++i) {
                 data.push_back(slots[i][0] & 0xff);
                 data.push_back((slots[i][0] >> 8) & 0xff);
                 data.push_back(slots[i][1] & 0xff);
