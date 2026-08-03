@@ -15,14 +15,13 @@ class SimpleKalmanFilter {
 public:
     SimpleKalmanFilter(float process_noise = 0.01f, float measurement_noise = 0.1f);
     void init(float x, float y);
-    std::pair<float, float> predict(float dt);
     std::pair<float, float> update(float mx, float my);
     bool initialized() const { return init_; }
 
 private:
     bool init_ = false;
     float P_[4][4], x_[4];
-    float F_[4][4], H_[2][4], Q_[4][4], R_[2][2];
+    float H_[2][4], Q_[4][4], R_[2][2];
 };
 
 // ============================================================
@@ -72,7 +71,6 @@ struct TrackedObject {
     float iou(const cv::Rect& other) const;
     void update(const cv::Rect& r, const std::string& lbl, const cv::Point2f& bottom);
     void markLost();
-    std::string stableLabel(int min_frames = 10) const;
 };
 
 // ============================================================
@@ -84,7 +82,6 @@ public:
     std::vector<TrackedObject> update(const std::vector<cv::Rect>& rects,
                                       const std::vector<std::string>& labels,
                                       const std::vector<cv::Point2f>& bottoms);
-    void reset();
     const std::unordered_map<int, TrackedObject>& tracks() const { return tracks_; }
 
 private:

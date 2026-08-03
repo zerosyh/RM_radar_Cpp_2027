@@ -59,11 +59,6 @@ private:
         }
     }
 
-    float zcx(Zone z) const {
-        float mid[] = {1.5f,7,14,21,26.5f};
-        return (my_color_=="Blue") ? mid[z] : 28-mid[z];
-    }
-
     void cb(const detect_result::msg::Locations::SharedPtr msg) {
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration<double>(now - last_pub_).count() < PUB_I) return;
@@ -128,8 +123,6 @@ private:
         // ---- 攻防判定 (考虑我方兵力) ----
         int def_en = zc_en[Z_DEF_MID]+zc_en[Z_DEF_DEEP];
         int def_fr = zc_fr[Z_DEF_MID]+zc_fr[Z_DEF_DEEP];
-        int atk_en = zc_en[Z_ATK_MID]+zc_en[Z_ATK_DEEP];
-        int cen_en = zc_en[Z_CENTER];
         // 防守条件: 我方半场敌多我少 → 守; 否则攻
         bool is_def = (def_en > def_fr);
 

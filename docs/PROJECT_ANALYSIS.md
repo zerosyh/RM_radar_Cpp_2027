@@ -317,16 +317,16 @@ use_fixed 模式: Quatro bootstrap(3帧累积) → 之后 small_gicp(GICPFactor)
 
 | # | 位置 | 说明 |
 |---|------|------|
-| D1 | tracker.cpp:42 `SimpleKalmanFilter::predict`（tracker.hpp:18） | 唯一 `KF.predict()` 在 radar.cpp:140，属 KalmanFilterPlus（cv::KalmanFilter），**非本类**；tracker 匹配纯 IoU |
-| D2 | tracker.cpp:162 `stableLabel`（tracker.hpp:75） | 声明+定义，零调用 |
-| D3 | tracker.cpp:234 `ObjectTracker::reset` | 零调用 |
+| ~~D1~~ | ~~tracker.cpp:42 `SimpleKalmanFilter::predict`~~ | ✅ **已删（2026-08-03）**，连同 F_ 成员（仅 predict 使用） |
+| ~~D2~~ | ~~tracker.cpp:162 `stableLabel`~~ | ✅ **已删（2026-08-03）** |
+| ~~D3~~ | ~~tracker.cpp:234 `ObjectTracker::reset`~~ | ✅ **已删（2026-08-03）** |
 | D4 | radar.cpp:296-301 `detect_cache_` + `detect_cache_mutex_` | 只写不读（emplace/pop 无消费），detectCb 已直接 cameraMatch |
 | D5 | radar.cpp:272-276 `sub_comp_` | rosbag 模式空 lambda 订阅，无实际用途 |
-| D6 | infer.cu:95,114 `preprocess_on_gpu` / `preprocess_classify_on_gpu`（非 _ex 版） | infer() 只用 _ex 版本；两函数+preprocess.cuh 声明均无调用者 |
-| D7 | infer.hpp:47-48 `getLastCarTime`/`getLastArmorTime`；:44 `getLastTotalTime` | "兼容旧接口"，零调用 |
-| D8 | sentry_decision.cpp:62 `zcx(Zone)` | 声明+定义，零调用 |
-| D9 | sentry_decision.cpp:131-132 `atk_en`/`cen_en` | 计算后从未使用（is_def 只依赖 def_en/def_fr） |
-| D10 | cost_map.h `pathLength`/`navPoint`/`at` 整套 A* | 仅 `cm_.load()` 被调用（sentry_decision.cpp:33），A* 全部未接线 |
+| ~~D6~~ | ~~infer.cu:95,114 `preprocess_on_gpu` / `preprocess_classify_on_gpu`（非 _ex 版）~~ | ✅ **已删（2026-08-03）**，连同 preprocess.cuh 声明 |
+| ~~D7~~ | ~~infer.hpp:47-48 `getLastCarTime`/`getLastArmorTime`；:44 `getLastTotalTime`~~ | ✅ **已删（2026-08-03）**，连同 `last_total_time_` 成员与 infer() 内计时 |
+| ~~D8~~ | ~~sentry_decision.cpp:62 `zcx(Zone)`~~ | ✅ **已删（2026-08-03）** |
+| ~~D9~~ | ~~sentry_decision.cpp:131-132 `atk_en`/`cen_en`~~ | ✅ **已删（2026-08-03）** |
+| ~~D10~~ | ~~cost_map.h `pathLength`/`navPoint`/`at` 整套 A*~~ | ✅ **已删（2026-08-03）**，cost_map.h 现仅保留网格数据 + load/loadDefault |
 | D11 | registration_node.cpp:169 `generate_initial_guesses` | 唯一调用被注释（:145） |
 | D12 | hik_camera_node.cpp:156,382 `n_payload_size_` | 仅写入+日志，无消费 |
 | D13 | display_panel.cpp:126-127 id 600-699 / 1600-1699 分支 | 无任何生产方（radar 只发 6/106） |
@@ -334,6 +334,11 @@ use_fixed 模式: Quatro bootstrap(3帧累积) → 之后 small_gicp(GICPFactor)
 | D15 | detect_result EkfDiagnostics.msg / EkfDiagnosticsArray.msg | C++ 无生产方（Python 版遗留） |
 | D16 | DetectResult.msg `xywh_box` | 无节点填充（detect 只填 xyxy_box） |
 | D17 | registration 大段注释代码 | :145, :173-180, :420-426, :481-491, :509-533, :597-611 等（guesses_ 多猜测方案） |
+| D18 | pcdCb 与 otherCb 地面发布块重复 | radar.cpp:559-597 与 :670-705，best_per_cid 去重+发布逻辑整段重复（~35 行）——重构候选（抽 `publishGround(lm)`），非直接删除 |
+| D19 | `InferArmor::valid_field` | infer.hpp:16 只写不读（detect.cpp:306 置 true，无消费者） |
+| D20 | registration `guesses_` / `source_tree_` 成员 | registration_node.hpp:110,126，仅被注释代码引用（:145, :433） |
+| D21 | detect.cpp 无用 include | `<atomic>` `<fstream>` `<cstring>` `<memory>` 零使用 |
+| D22 | tracker `label_stable` 机制 | 仅 tracker.cpp 内部写（label 恒为 "car"），全项目无读者 |
 
 ### 7.2 死配置字段（声明但零消费）✂️
 
@@ -362,7 +367,7 @@ use_fixed 模式: Quatro bootstrap(3帧累积) → 之后 small_gicp(GICPFactor)
 ### 7.4 半死/降级（需决策，勿直接删）
 
 - **camera.mode "test"/"video"**：分支存在但无图像源生产（video_source/test_image 不消费），实际不可用；除非有外部 /image 发布者
-- tracker 的 `label_stable`/`label` 机制：实际 label 恒为 "car"，相关计数逻辑冗余（删 stableLabel 后 label 字段仅供调试）
+- tracker 的 `label`/`label_stable` 机制：实际 label 恒为 "car"，label 相关逻辑已列 D2/D22，删除后 `label` 字段仅供调试保留
 
 ### 7.5 删除建议
 

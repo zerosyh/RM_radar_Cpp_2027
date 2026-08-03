@@ -41,11 +41,6 @@ public:
     float getLastArmorInferTime()       const { return last_armor_infer_time_; }
     float getLastArmorPostprocessTime() const { return last_armor_postprocess_time_; }
     float getLastDigitTotalTime()       const { return last_digit_total_time_; }
-    float getLastTotalTime()            const { return last_total_time_; }
-
-    // 兼容旧接口
-    float getLastCarTime()   const { return last_car_preprocess_time_ + last_car_infer_time_ + last_car_postprocess_time_; }
-    float getLastArmorTime() const { return last_armor_preprocess_time_ + last_armor_infer_time_ + last_armor_postprocess_time_ + last_digit_total_time_; }
 
     InferEngine(const InferEngine&) = delete;
     InferEngine& operator=(const InferEngine&) = delete;
@@ -78,7 +73,6 @@ private:
     float last_armor_infer_time_       = 0.0f;
     float last_armor_postprocess_time_ = 0.0f;
     float last_digit_total_time_       = 0.0f;
-    float last_total_time_             = 0.0f;
 };
 
 

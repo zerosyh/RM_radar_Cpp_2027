@@ -92,40 +92,6 @@ __global__ void preprocess_classify_kernel(
 }
 
 // ==================== 预处理包装函数 ====================
-void preprocess_on_gpu(const cv::Mat& cpu_frame, float* d_input, int inW, int inH, cudaStream_t stream) {
-    int origW = cpu_frame.cols, origH = cpu_frame.rows;
-    size_t srcSize = origW * origH * 3 * sizeof(uint8_t);
-    uint8_t* d_src = nullptr;
-    cudaMallocAsync(&d_src, srcSize, stream);
-    cudaMemcpyAsync(d_src, cpu_frame.data, srcSize, cudaMemcpyHostToDevice, stream);
-
-    float scale = std::min(static_cast<float>(inW) / origW, static_cast<float>(inH) / origH);
-    int new_w = static_cast<int>(origW * scale);
-    int new_h = static_cast<int>(origH * scale);
-    int dw = (inW - new_w) / 2;
-    int dh = (inH - new_h) / 2;
-
-    dim3 block(32, 16);
-    dim3 grid((inW + block.x - 1) / block.x, (inH + block.y - 1) / block.y);
-    preprocess_kernel<<<grid, block, 0, stream>>>(d_src, origW, origH, d_input, inW, inH, scale, dw, dh, new_w, new_h);
-    cudaFreeAsync(d_src, stream);
-}
-
-void preprocess_classify_on_gpu(const cv::Mat& cpu_frame, float* d_input, int inW, int inH, cudaStream_t stream) {
-    int origW = cpu_frame.cols, origH = cpu_frame.rows;
-    size_t srcSize = origW * origH * 3 * sizeof(uint8_t);
-    uint8_t* d_src = nullptr;
-    cudaMallocAsync(&d_src, srcSize, stream);
-    cudaMemcpyAsync(d_src, cpu_frame.data, srcSize, cudaMemcpyHostToDevice, stream);
-
-    dim3 block(32, 16);
-    dim3 grid((inW + block.x - 1) / block.x, (inH + block.y - 1) / block.y);
-    preprocess_classify_kernel<<<grid, block, 0, stream>>>(d_src, origW, origH, d_input, inW, inH,
-                                                           0.485f, 0.456f, 0.406f,
-                                                           0.229f, 0.224f, 0.225f);
-    cudaFreeAsync(d_src, stream);
-}
-
 void preprocess_on_gpu_ex(const cv::Mat& cpu_frame, float* d_input, int inW, int inH,
                           cudaStream_t stream, uint8_t* d_scratch) {
     int origW = cpu_frame.cols, origH = cpu_frame.rows;
@@ -183,8 +149,6 @@ InferEngine::~InferEngine() {
 }
 
 std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
-    auto t_total_start = std::chrono::steady_clock::now();
-
     int orig_w = frame.cols, orig_h = frame.rows;
     cv::Mat frame_resized;
     cv::resize(frame, frame_resized, cv::Size(1280, 1280));
@@ -327,9 +291,6 @@ std::vector<InferArmor> InferEngine::infer(const cv::Mat& frame) {
     last_armor_infer_time_       = 0.0f;  // 已包含在 preprocess 中（异步流水线无法精确拆分）
     last_armor_postprocess_time_ = std::chrono::duration<float, std::milli>(t_armor_post_end - t_armor_pre_end).count() - digit_total_time;
     last_digit_total_time_       = digit_total_time;
-
-    auto t_total_end = std::chrono::steady_clock::now();
-    last_total_time_ = std::chrono::duration<float, std::milli>(t_total_end - t_total_start).count();
 
     return armors;
 }

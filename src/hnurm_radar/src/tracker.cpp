@@ -8,12 +8,6 @@
 // SimpleKalmanFilter
 // ============================================================
 SimpleKalmanFilter::SimpleKalmanFilter(float process_noise, float measurement_noise) {
-    std::memset(F_, 0, sizeof(F_));
-    F_[0][0] = 1; F_[0][2] = 1;
-    F_[1][1] = 1; F_[1][3] = 1;
-    F_[2][2] = 1;
-    F_[3][3] = 1;
-
     std::memset(H_, 0, sizeof(H_));
     H_[0][0] = 1;
     H_[1][1] = 1;
@@ -37,32 +31,6 @@ void SimpleKalmanFilter::init(float x, float y) {
     x_[0] = x; x_[1] = y;
     x_[2] = 0; x_[3] = 0;
     init_ = true;
-}
-
-std::pair<float, float> SimpleKalmanFilter::predict(float dt) {
-    if (!init_) return {0,0};
-    F_[0][2] = dt; F_[1][3] = dt;
-    float nx[4] = {};
-    for (int i = 0; i < 4; ++i)
-        for (int j = 0; j < 4; ++j)
-            nx[i] += F_[i][j] * x_[j];
-    std::memcpy(x_, nx, sizeof(x_));
-
-    // P = F * P * F^T + Q
-    float FP[4][4] = {{0}};
-    for (int i = 0; i < 4; ++i)
-        for (int j = 0; j < 4; ++j)
-            for (int k = 0; k < 4; ++k)
-                FP[i][j] += F_[i][k] * P_[k][j];
-    float FPFt[4][4] = {{0}};
-    for (int i = 0; i < 4; ++i)
-        for (int j = 0; j < 4; ++j)
-            for (int k = 0; k < 4; ++k)
-                FPFt[i][j] += FP[i][k] * F_[j][k];
-    for (int i = 0; i < 4; ++i)
-        for (int j = 0; j < 4; ++j)
-            P_[i][j] = FPFt[i][j] + Q_[i][j];
-    return {x_[0], x_[1]};
 }
 
 std::pair<float, float> SimpleKalmanFilter::update(float mx, float my) {
@@ -159,12 +127,6 @@ void TrackedObject::markLost() {
     lost++;
 }
 
-std::string TrackedObject::stableLabel(int min_frames) const {
-    if (label_stable >= min_frames && !label.empty() && label != "NULL")
-        return label;
-    return "NULL";
-}
-
 // ============================================================
 // ObjectTracker
 // ============================================================
@@ -229,9 +191,4 @@ std::vector<TrackedObject> ObjectTracker::update(
         else ++it;
     }
     return out;
-}
-
-void ObjectTracker::reset() {
-    tracks_.clear();
-    next_id_ = 0;
 }
