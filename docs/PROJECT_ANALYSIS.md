@@ -358,11 +358,15 @@ use_fixed 模式: Quatro bootstrap(3帧累积) → 之后 small_gicp(GICPFactor)
 
 ### 7.3 冗余文件资产（无引用）✂️
 
-| # | 路径 | 说明 |
-|---|------|------|
-| R1 | model/model/ 整个目录 | 旧引擎 + onnx + trt_load.log + best.engine.bak(0B)，配置无引用 |
-| R2 | model/TensorRT/best.engine、armor2_nms.engine、armor_digit.engine | 旧版引擎，config 只引用 car/armor2_hku/digit_hku |
-| R3 | model/ONNX/armor_yolo.onnx（44MB） | 无引用 |
+| # | 路径 | 说明 | 状态 |
+|---|------|------|------|
+| R1 | model/model/ 整个目录 | 旧引擎 + onnx + trt_load.log + best.engine.bak(0B)，配置无引用 | ✅ **已删（2026-08-03）**，回收 ~125MB |
+| R2 | model/TensorRT/best.engine、armor2_nms.engine、armor_digit.engine | 旧版引擎，config 只引用 car/armor2_hku/digit_hku | ✅ **已删（2026-08-03）**，回收 ~25MB |
+| R3 | model/ONNX/armor_yolo.onnx、armor_yolo_simpl.onnx、RM2025.onnx | 5/13-5/16 旧实验模型，无对应引擎 | ✅ **已删（2026-08-03）**，回收 ~134MB |
+| R4 | model/ONNX/classify.onnx（44.7MB） | digit_hku.engine 的唯一可疑源（5/13，尺寸存疑） | ⚠️ **保守保留**——无法确认 digit 源，建议确认后定去留 |
+| — | model/TensorRT/car_nms.onnx + armor2_hku.onnx + ONNX/car.onnx | 活跃引擎源链（mtime 验证：car.onnx→car_nms.onnx→car.engine 5/31 同链） | ✅ 保留 |
+
+> 删除依据（2026-08-03）：mtime 谱系分析——活跃引擎均 5/31 导出，car.onnx(5/31 18:19)→car_nms.onnx(18:28)→car.engine(18:34) 同链、armor2_hku.onnx(19:01)→engine(19:07) 同链；5/13-5/22 文件均为旧实验。点云/地图文件按用户指示暂不处理。
 
 ### 7.4 半死/降级（需决策，勿直接删）
 
