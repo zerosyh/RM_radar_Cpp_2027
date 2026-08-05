@@ -2,12 +2,12 @@
 path:
   stage_one_path:  "model/TensorRT/car.engine"
   stage_two_path: "model/TensorRT/armor2_hku.engine"
-  stage_three_path: "model/TensorRT/digit_hku.engine"
+  stage_three_path: "model/TensorRT/digit5.engine"
   tracker_path: "configs/botsort.yaml"
 
 
 params:
-  labels: ["1","2","3","4","S","Q"]
+  labels: ["1","2","3","4","S"]   # 5 类: 数字 1-4 + 哨兵 S(前哨站 Q 不参与)
   stage_one_conf: 0.57
   stage_two_conf: 0.5
   stage_three_conf: 0.5

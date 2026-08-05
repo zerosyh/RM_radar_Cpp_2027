@@ -281,18 +281,16 @@ private:
         // 调用推理引擎
         auto armors = infer_engine_->infer(frame);
 
-        // 获取车辆框（1280坐标）用于绘制
+        // 获取车辆框(原图坐标)用于绘制
         const auto& car_boxes = infer_engine_->getLastCarBoxes();
 
-        // 准备1280尺寸图像用于绘制
-        cv::Mat frame_resized;
-        cv::resize(frame, frame_resized, cv::Size(1280, 1280));
-        float scale_x = static_cast<float>(frame.cols) / 1280.0f;
-        float scale_y = static_cast<float>(frame.rows) / 1280.0f;
+        // 原图绘制: 字号/线宽按分辨率缩放(1280 基准)
+        float draw_scale = static_cast<float>(frame.cols) / 1280.0f;
+        int box_thick = std::max(1, static_cast<int>(2 * draw_scale));
 
-        // 绘制车辆框
+        // 绘制车辆框(直接原图)
         for (const auto& box : car_boxes) {
-            cv::rectangle(frame_resized, box, cv::Scalar(255, 0, 0), 2);
+            cv::rectangle(frame, box, cv::Scalar(255, 0, 0), box_thick);
         }
 
         // 计算场地坐标并绘制装甲板框
@@ -307,19 +305,15 @@ private:
                 coords.emplace_back(field_xy.first, field_xy.second);
             }
 
-            // 在1280图像上绘制装甲板框（反向缩放）
-            int draw_x1 = static_cast<int>(ar.abs_rect.x / scale_x);
-            int draw_y1 = static_cast<int>(ar.abs_rect.y / scale_y);
-            int draw_x2 = static_cast<int>((ar.abs_rect.x + ar.abs_rect.width) / scale_x);
-            int draw_y2 = static_cast<int>((ar.abs_rect.y + ar.abs_rect.height) / scale_y);
-            cv::rectangle(frame_resized, cv::Point(draw_x1, draw_y1), cv::Point(draw_x2, draw_y2),
-                          cv::Scalar(0, 255, 0), 2);
-            cv::putText(frame_resized, ar.label, cv::Point(draw_x1, draw_y1 - 5),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+            // 在原图上绘制装甲板框(字号线宽随分辨率缩放)
+            cv::rectangle(frame, ar.abs_rect, cv::Scalar(0, 255, 0), box_thick);
+            cv::putText(frame, ar.label, cv::Point(ar.abs_rect.x, ar.abs_rect.y - 8 * draw_scale),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.5f * draw_scale, cv::Scalar(0, 255, 0),
+                        std::max(1, static_cast<int>(draw_scale)));
         }
 
         // ===== 帧间追踪器（对车辆框做追踪，每个 track 代表一辆车） =====
-        // 获取车辆底部中心点（1280x1280坐标系）
+        // 获取车辆底部中心点（原图坐标系）
         const auto& car_bottoms = infer_engine_->getLastCarBottomPts();
 
         // 用车辆框做追踪
@@ -346,20 +340,13 @@ private:
         for (auto& ar : armors) {
             int best_match = -1;
             float best_iou = 0.0f;
-            float ar_cx = (ar.abs_rect.x + ar.abs_rect.width / 2.0f) / scale_x;
-            float ar_cy = (ar.abs_rect.y + ar.abs_rect.height / 2.0f) / scale_y;
-            cv::Point2f ar_center(ar_cx, ar_cy);
+            cv::Point2f ar_center(ar.abs_rect.x + ar.abs_rect.width / 2.0f,
+                                  ar.abs_rect.y + ar.abs_rect.height / 2.0f);
 
             for (const auto& tr : car_tracked) {
                 if (tr.last_rect.contains(ar_center)) {
-                    cv::Rect armor_in_1280(
-                        ar.abs_rect.x / scale_x,
-                        ar.abs_rect.y / scale_y,
-                        ar.abs_rect.width / scale_x,
-                        ar.abs_rect.height / scale_y
-                    );
-                    cv::Rect inter = tr.last_rect & armor_in_1280;
-                    float iou_val = (float)inter.area() / (float)(tr.last_rect.area() + armor_in_1280.area() - inter.area());
+                    cv::Rect inter = tr.last_rect & ar.abs_rect;
+                    float iou_val = (float)inter.area() / (float)(tr.last_rect.area() + ar.abs_rect.area() - inter.area());
                     if (iou_val > best_iou) {
                         best_iou = iou_val;
                         best_match = tr.track_id;
@@ -432,7 +419,7 @@ private:
 
         // 显示任务
         DisplayTask task;
-        task.frame = frame_resized.clone();
+        task.frame = frame.clone();
         task.armors = armors;
         task.coords = coords;
         {

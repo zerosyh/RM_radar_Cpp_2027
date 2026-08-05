@@ -55,6 +55,7 @@ private:
     uint8_t *d_scratch_car_;
     uint8_t *d_scratch_armor_;
     uint8_t *d_scratch_digit_;
+    size_t scratch_cap_ = 0;
 
     float conf_car_;
     float conf_armor_;
