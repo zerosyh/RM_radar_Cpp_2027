@@ -151,3 +151,8 @@ area: # 每一个area是一个列表，元素为点的二元组，表示一个�
     - [8.75, 9.71]
     - [10.94, 9.04]
     - [12.23, 11.13]   # 蓝方英雄在环高下半部分
+
+# ai_decision: 哨兵 BC 模型接入
+ai:
+  engine_path: "model/ONNX/sentry_v2.engine"        # 哨兵模型 TRT engine
+  means_path: "model/ONNX/sentry_state_means.bin"   # 时刻均值矩阵 (419x101 float32)

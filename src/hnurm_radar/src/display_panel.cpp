@@ -52,6 +52,10 @@ public:
         sub_sentry_ = create_subscription<detect_result::msg::Locations>(
             "sentry_targets", qos,
             std::bind(&DisplayPanel::sentryCb, this, std::placeholders::_1));
+        // AI 模型 NAV (ai_decision 输出, 与规则 NAV 对比显示)
+        sub_ai_nav_ = create_subscription<detect_result::msg::Locations>(
+            "ai_nav", qos,
+            std::bind(&DisplayPanel::aiNavCb, this, std::placeholders::_1));
 
         rclcpp::QoS pub_qos(rclcpp::KeepLast(1));
         pub_qos.reliable();
@@ -78,6 +82,10 @@ private:
         std::lock_guard<std::mutex> l(sentry_mtx_);
         sentry_locs_ = *msg;
     }
+    void aiNavCb(const detect_result::msg::Locations::SharedPtr msg) {
+        std::lock_guard<std::mutex> l(ai_nav_mtx_);
+        ai_nav_locs_ = *msg;
+    }
 
     void drawRobotMarker(cv::Mat& img, int xx, int yy, const cv::Scalar& color, bool is_air, float z) {
         if (is_air) {
@@ -101,7 +109,7 @@ private:
         const int PUB_EVERY_N = 5;
 
         while (rclcpp::ok() && running_) {
-            detect_result::msg::Locations locs_copy, sentry_copy;
+            detect_result::msg::Locations locs_copy, sentry_copy, ai_nav_copy;
             {
                 std::lock_guard<std::mutex> l(mtx_);
                 locs_copy = latest_locs_;
@@ -109,6 +117,10 @@ private:
             {
                 std::lock_guard<std::mutex> l(sentry_mtx_);
                 sentry_copy = sentry_locs_;
+            }
+            {
+                std::lock_guard<std::mutex> l(ai_nav_mtx_);
+                ai_nav_copy = ai_nav_locs_;
             }
 
             cv::Mat show_map = map_img_.clone();
@@ -228,6 +240,19 @@ private:
                     }
                 }
             }
+            // ---- AI 模型 NAV (ai_decision, 橙色菱形对比) ----
+            for (const auto& loc : ai_nav_copy.locs) {
+                float x = loc.x, y = loc.y;
+                int xx = static_cast<int>(x * 100);
+                int yy = map_px_h_ - static_cast<int>(y * 100);
+                cv::Scalar orange(0, 165, 255);
+                std::vector<cv::Point> diamond = {
+                    {xx, yy - 30}, {xx + 30, yy}, {xx, yy + 30}, {xx - 30, yy}
+                };
+                cv::polylines(show_map, diamond, true, orange, 3);
+                cv::putText(show_map, "AI-NAV", cv::Point(xx + 25, yy),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.7, orange, 2);
+            }
 
             cv::imshow("map", show_map);
             cv::waitKey(16);
@@ -260,11 +285,14 @@ private:
 
     detect_result::msg::Locations latest_locs_;
     detect_result::msg::Locations sentry_locs_;
+    detect_result::msg::Locations ai_nav_locs_;
     std::mutex mtx_;
     std::mutex sentry_mtx_;
+    std::mutex ai_nav_mtx_;
 
     rclcpp::Subscription<detect_result::msg::Locations>::SharedPtr sub_location_;
     rclcpp::Subscription<detect_result::msg::Locations>::SharedPtr sub_sentry_;
+    rclcpp::Subscription<detect_result::msg::Locations>::SharedPtr sub_ai_nav_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pub_map_view_;
 
     std::thread display_thread_;

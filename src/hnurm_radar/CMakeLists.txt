@@ -205,7 +205,20 @@ ament_target_dependencies(
 target_link_libraries(judge_messager yaml-cpp)
 
 # --------------- 安装 ---------------
-install(TARGETS  lidar hik_camera_node detect radar display_panel sentry_decision judge_messager
+# --- ai_decision 哨兵模型接入 ---
+add_executable(ai_decision src/ai_decision.cpp)
+target_include_directories(ai_decision PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${TENSORRT_INCLUDE_DIR})
+target_compile_features(ai_decision PUBLIC c_std_99 cxx_std_17)
+ament_target_dependencies(
+  ai_decision
+  "rclcpp"
+  "detect_result"
+)
+target_link_libraries(ai_decision yaml-cpp CUDA::cudart ${TENSORRT_LIB} ${TENSORRT_PLUGIN_LIB})
+install(TARGETS  lidar hik_camera_node detect radar display_panel sentry_decision judge_messager ai_decision
   DESTINATION lib/${PROJECT_NAME})
 
 # 安装模型和配置等资源
