@@ -111,6 +111,19 @@ target_link_libraries(detect
   ${TENSORRT_PLUGIN_LIB}
 )
 
+# --- detect_dart_test 节点（仅接收 rosbag 压缩图像）---
+add_executable(detect_dart_test src/detect_dart_test.cpp)
+target_include_directories(detect_dart_test PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(detect_dart_test PUBLIC c_std_99 cxx_std_17)
+ament_target_dependencies(
+  detect_dart_test
+  "rclcpp"
+  "sensor_msgs"
+)
+target_link_libraries(detect_dart_test ${OpenCV_LIBS} yaml-cpp)
+
 # --- lidar ---
 add_executable(lidar src/lidar.cpp)
 target_include_directories(lidar PUBLIC
@@ -218,7 +231,7 @@ ament_target_dependencies(
   "detect_result"
 )
 target_link_libraries(ai_decision yaml-cpp CUDA::cudart ${TENSORRT_LIB} ${TENSORRT_PLUGIN_LIB})
-install(TARGETS  lidar hik_camera_node detect radar display_panel sentry_decision judge_messager ai_decision
+install(TARGETS  lidar hik_camera_node detect detect_dart_test radar display_panel sentry_decision judge_messager ai_decision
   DESTINATION lib/${PROJECT_NAME})
 
 # 安装模型和配置等资源

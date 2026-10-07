@@ -1,7 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <detect_result/msg/locations.hpp>
 #include <yaml-cpp/yaml.h>
-#include <algorithm>
 #include <thread>
 #include <mutex>
 #include <vector>
@@ -86,9 +85,6 @@ static std::vector<uint8_t> buildFrame(uint16_t cmd_id, const std::vector<uint8_
     return buf;
 }
 
-// 0x0301 子内容 ID：0x0200~0x02FF 为"机器人之间通信"自由段（协议只给范围，值由队伍自定义）
-static constexpr uint16_t SUB_CMD_RADAR2SENTRY = 0x0233;  // 雷达 → 己方哨兵
-
 // ── 裁判系统通信节点 ────────────────────────────────────
 class JudgeMessager : public rclcpp::Node {
 public:
@@ -96,7 +92,6 @@ public:
         auto cfg = YAML::LoadFile("configs/main_config.yaml");
         my_color_ = cfg["global"]["my_color"].as<std::string>("Red");
         my_id_ = (my_color_ == "Red") ? 9 : 109;
-        sentry_id_ = (my_color_ == "Red") ? 7 : 107;
         field_w_ = cfg["scenes"]["competition"]["field_width"].as<float>(28.0f);
         field_h_ = cfg["scenes"]["competition"]["field_height"].as<float>(15.0f);
 
@@ -112,8 +107,8 @@ public:
             "location", qos, std::bind(&JudgeMessager::cb, this, std::placeholders::_1));
 
         thread_ = std::thread(&JudgeMessager::loop, this);
-        RCLCPP_INFO(get_logger(), "JudgeMessager ready. port=%s color=%s id=%d sentry_id=%d",
-                    port_.c_str(), my_color_.c_str(), my_id_, sentry_id_);
+        RCLCPP_INFO(get_logger(), "JudgeMessager ready. port=%s color=%s id=%d",
+                    port_.c_str(), my_color_.c_str(), my_id_);
     }
 
     ~JudgeMessager() {
@@ -124,7 +119,7 @@ public:
 
 private:
     std::string my_color_, port_;
-    int my_id_, sentry_id_, fd_ = -1;
+    int my_id_, fd_ = -1;
     float field_w_, field_h_;
     bool running_ = true;
 
@@ -141,16 +136,6 @@ private:
         if (n == 3) return 2; if (n == 4) return 3;
         if (n == 6) return 4; if (n == 7) return 5;
         return -1;
-    }
-
-    // 6 槽 × (x, y) = 24B: 与 0x0305 偏移 0~23 逐字节同布局
-    static void putSlots(const uint16_t slots[][2], int from, int count, std::vector<uint8_t>& out) {
-        for (int i = from; i < from + count; ++i) {
-            out.push_back(slots[i][0] & 0xff);
-            out.push_back((slots[i][0] >> 8) & 0xff);
-            out.push_back(slots[i][1] & 0xff);
-            out.push_back((slots[i][1] >> 8) & 0xff);
-        }
     }
 
     void openSerial(const std::string& dev, int bps) {
@@ -201,31 +186,18 @@ private:
                 slots[idx][0] = x; slots[idx][1] = y;
             }
 
-            // 敌方 24B: 0x0305 偏移 0~23, 也是发给哨兵的内容段
-            std::vector<uint8_t> enemy24;
-            enemy24.reserve(24);
-            putSlots(slots, 0, 6, enemy24);
-
-            // 打包 0x0305 (48B) = 敌方 24B + 己方 24B
-            std::vector<uint8_t> data = enemy24;
-            putSlots(slots, 6, 6, data);
+            // 打包 0x0305 (48B)
+            std::vector<uint8_t> data;
+            for (int i = 0; i < 12; ++i) {
+                data.push_back(slots[i][0] & 0xff);
+                data.push_back((slots[i][0] >> 8) & 0xff);
+                data.push_back(slots[i][1] & 0xff);
+                data.push_back((slots[i][1] >> 8) & 0xff);
+            }
             auto frame = buildFrame(0x0305, data);
             if (fd_ >= 0) write(fd_, frame.data(), frame.size());
 
-            // 雷达 → 己方哨兵: 0x0301 + 子内容 0x0233, 内容段 = 敌方坐标 24B
-            std::vector<uint8_t> s2_data;
-            s2_data.reserve(30);
-            s2_data.push_back(SUB_CMD_RADAR2SENTRY & 0xff);
-            s2_data.push_back((SUB_CMD_RADAR2SENTRY >> 8) & 0xff);
-            s2_data.push_back(my_id_ & 0xff);
-            s2_data.push_back((my_id_ >> 8) & 0xff);
-            s2_data.push_back(sentry_id_ & 0xff);
-            s2_data.push_back((sentry_id_ >> 8) & 0xff);
-            s2_data.insert(s2_data.end(), enemy24.begin(), enemy24.end());
-            auto s2_frame = buildFrame(0x0301, s2_data);
-            if (fd_ >= 0) write(fd_, s2_frame.data(), s2_frame.size());
-
-            // 双倍易伤 (0x0301 + 子内容 0x0121 → 服务器)
+            // 双倍易伤 (0x0301)
             std::vector<uint8_t> db_data;
             db_data.push_back(0x21); db_data.push_back(0x01);  // sub_cmd 0x0121
             db_data.push_back(my_id_ & 0xff);

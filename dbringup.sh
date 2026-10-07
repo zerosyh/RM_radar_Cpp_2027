@@ -21,16 +21,9 @@ source install/setup.bash
 cd ~/rm_lidar_2027/RM_radar_Cpp_2027
 
 cmds=(
-    "ros2 launch livox_ros_driver2 rviz_HAP_launch.py"
-    "ros2 run hnurm_radar lidar"
-    "ros2 run hnurm_radar radar"
-    "ros2 launch registration registration.launch.py"
-    "ros2 run hnurm_radar detect"
-    "ros2 run hnurm_radar sentry_decision"
-    "ros2 run hnurm_radar ai_decision"
-    "ros2 run hnurm_radar display_panel"
+    
+    "ros2 run hnurm_radar detect_dart_test"
     "ros2 run radar_web_ui web_ui_node"  # 调试 Web UI: http://<本机IP>:8766
-    "ros2 run hnurm_radar judge_messager"
     "ros2 bag play /home/syh/下载/全明星赛第一局 --rate 1.0"
 )
 

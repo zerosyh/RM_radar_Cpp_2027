@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RM Radar 2027 · 调试台</title>
+  <link rel="stylesheet" href="/styles.css?v=2027.1" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <h1>RM Radar 2027 <span>调试台</span></h1>
+      <p id="summary">等待 Web UI 数据…</p>
+    </div>
+    <nav class="tabs" aria-label="页面切换">
+      <button class="tab active" data-page="map" id="tabMap">① 赛场地图</button>
+      <button class="tab" data-page="wave" id="tabWave">② 解析波分析</button>
+      <button class="tab" data-page="status" id="tabStatus">③ 运行状态</button>
+    </nav>
+    <div class="header-status">
+      <span id="connBadge" class="badge unknown">连接中</span>
+      <span id="genBadge" class="badge neutral">gen 0</span>
+      <span id="clockBadge" class="badge neutral">--:--:--</span>
+    </div>
+  </header>
+
+  <!-- ============================== 页面 1: 赛场地图 ============================== -->
+  <section class="page active" id="page-map">
+    <div class="map-layout">
+      <div class="map-area">
+        <div class="map-toolbar">
+          <div class="legend">
+            <span><i class="dot red"></i>红方</span>
+            <span><i class="dot blue"></i>蓝方</span>
+            <span><i class="dot sentry"></i>哨兵决策</span>
+            <span><i class="dot ai"></i>AI-NAV</span>
+            <span><i class="marker x"></i>最后已知</span>
+            <span><i class="dot det"></i>检测投影</span>
+          </div>
+          <div class="map-meta" id="mapMeta">坐标: 裁判系统系 28×15 m · 红方补给站原点</div>
+        </div>
+        <div id="mapViewport" class="map-viewport">
+          <canvas id="mapCanvas"></canvas>
+          <div id="mapEmpty" class="map-empty">
+            <p>等待定位数据…</p>
+            <small>location / ekf_location_filtered 话题有消息后自动绘制</small>
+          </div>
+          <div id="mapTooltip" class="map-tooltip" hidden></div>
+        </div>
+      </div>
+
+      <aside class="side">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>机器人实时信息</h2>
+            <span id="robotCount" class="muted">0 辆</span>
+          </div>
+          <div id="robotList" class="robot-list">
+            <div class="empty">暂无机器人</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>详细数据 / 调试参数</h2>
+          </div>
+          <div id="robotDetail" class="detail">
+            <div class="empty">点击地图或左侧列表选择机器人</div>
+          </div>
+          <div class="detail-separator"></div>
+          <div id="debugParams" class="debug-params"></div>
+        </section>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============================== 页面 2: 解析波分析 ============================== -->
+  <section class="page" id="page-wave" hidden>
+    <div class="wave-topbar">
+      <div id="waveBadge" class="badge unknown">等待接入</div>
+      <div class="wave-summary" id="waveSummary">
+        <span>接口: HTTP POST /api/wave/ingest · ROS2 /wave_analysis (std_msgs/String JSON)</span>
+      </div>
+      <div class="wave-actions">
+        <button id="waveClearBtn" class="btn" type="button">清空数据</button>
+        <button id="waveDemoBtn" class="btn" type="button">填入示例并发送</button>
+      </div>
+    </div>
+
+    <div class="wave-grid">
+      <section class="panel chart-panel wide">
+        <div class="panel-head"><h2>时域波形 (振幅-时间)</h2><span id="waveTimeMeta" class="muted">—</span></div>
+        <div class="chart-box"><canvas id="waveCanvas"></canvas><div class="chart-empty" id="waveEmpty">等待解析波数据…</div></div>
+      </section>
+      <section class="panel chart-panel">
+        <div class="panel-head"><h2>频谱 (FFT)</h2><span id="waveFftMeta" class="muted">—</span></div>
+        <div class="chart-box"><canvas id="fftCanvas"></canvas></div>
+      </section>
+      <section class="panel chart-panel">
+        <div class="panel-head"><h2>距离剖面 (振幅-距离)</h2><span id="waveRangeMeta" class="muted">—</span></div>
+        <div class="chart-box"><canvas id="rangeCanvas"></canvas></div>
+      </section>
+      <section class="panel chart-panel">
+        <div class="panel-head"><h2>角度剖面 (振幅-角度)</h2><span id="waveAngleMeta" class="muted">—</span></div>
+        <div class="chart-box"><canvas id="angleCanvas"></canvas></div>
+      </section>
+    </div>
+
+    <div class="wave-bottom">
+      <section class="panel">
+        <div class="panel-head"><h2>采样数据</h2><span id="waveSampleMeta" class="muted">0 点</span></div>
+        <div class="table-wrap"><table id="waveSampleTable" class="data-table"></table></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>接口说明</h2></div>
+        <div class="api-doc">
+          <pre id="apiDoc">POST /api/wave/ingest
+Content-Type: application/json
+
+{
+  "source": "wave_parser",
+  "seq": 1,
+  "status": "valid",
+  "mode": "fmcw",
+  "meta": {"center_frequency_hz": 10e9},
+  "samples": [
+    {"t_ms": 0.0, "amplitude": 0.12, "snr_db": 18.0,
+     "distance_m": 6.0, "angle_deg": 3.2}
+  ]
+}</pre>
+        </div>
+        <div class="test-form">
+          <h3>接口联调(页面内测试)</h3>
+          <textarea id="waveTestJson" spellcheck="false"></textarea>
+          <button id="waveTestBtn" class="btn primary" type="button">POST /api/wave/ingest</button>
+          <span id="waveTestResult" class="muted"></span>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ============================== 页面 3: 运行状态 ============================== -->
+  <section class="page" id="page-status" hidden>
+    <div class="status-cards" id="statusCards"></div>
+
+    <div class="status-grid">
+      <section class="panel span-2">
+        <div class="panel-head"><h2>ROS 话题实时状态</h2><span id="topicCount" class="muted"></span></div>
+        <div class="table-wrap tall"><table class="data-table" id="topicTable"></table></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>小地图发布流 (map_view)</h2></div>
+        <div class="stream-box">
+          <img id="mapStreamImg" src="/stream/map_view" alt="map_view MJPEG" />
+          <span id="mapStreamState" class="stream-state">等待图像…</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>检测画面 (detect_view)</h2></div>
+        <div class="stream-box">
+          <img id="detectStreamImg" src="/stream/detect_view" alt="detect_view MJPEG" />
+          <span id="detectStreamState" class="stream-state">等待图像…</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>当前配置 (main_config.yaml)</h2></div>
+        <div class="table-wrap tall"><table class="data-table" id="configTable"></table></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>EKF 诊断 (ekf_diagnostics)</h2></div>
+        <div class="table-wrap tall"><table class="data-table" id="ekfTable"></table></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Web UI 事件日志</h2></div>
+        <div id="logList" class="log-list"></div>
+      </section>
+
+      <section class="panel span-2">
+        <div class="panel-head"><h2>ROS Graph 相关话题</h2></div>
+        <div class="table-wrap tall"><table class="data-table" id="graphTable"></table></div>
+      </section>
+    </div>
+  </section>
+
+  <script src="/app.js?v=2027.1"></script>
+</body>
+</html>

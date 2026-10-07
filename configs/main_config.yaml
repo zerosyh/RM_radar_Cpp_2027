@@ -39,9 +39,9 @@ scenes:
     field_width: 28.0                       # 赛场宽度(m)
     field_height: 15.0                      # 赛场高度(m)
   lab:
-    std_map: "source/maps/lab/lab_map_28x15.png"        # 实验室 display_panel 底图（裁剪后2800×1500）
+    std_map: "source/maps/lab/map_2d_cropped.png"        # 实验室 display_panel 底图（裁剪后2800×1500）
     std_map_grid: "source/maps/lab/lab_map_28x15_grid.png"  # 带坐标网格的版本（调试用）
-    pfa_map: "source/maps/lab/lab_map_28x15.png"        # 实验室透视标定用地图
+    pfa_map: "source/maps/lab/map_2d_cropped.png"        # 实验室透视标定用地图
     pcd_file: "source/pointclouds/registration/lab_pcds.pcd"           # 实验室点云地图
     downsampled_pcd: "source/pointclouds/registration/lab_pcds_downsampled.pcd"  # 实验室降采样点云地图
     field_width: 28.0                       # 由标定工具自动更新
